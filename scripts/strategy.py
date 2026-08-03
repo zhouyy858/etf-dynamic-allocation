@@ -143,6 +143,11 @@ class DynamicStrategy:
         self.valuation_cut = [float(x) for x in cfg.get("valuation_cut", [0.6, 0.35])]
         self.downside_vol = bool(cfg.get("downside_vol", False))
         self._prev_eff = None
+        fp = cfg.get("floor_pct", {"cn": 15.0, "us": 15.0})
+        cn_f, us_f = float(fp["cn"]), float(fp["us"])
+        self.floor = {"159232": cn_f / 2.0, "515100": cn_f / 2.0,
+                      "159941": us_f / 2.0, "513500": us_f / 2.0, "159952": 0.0}
+        self.floor_eq = cn_f + us_f
         self._lock = {"CN": False, "US": False}
         self.state_log = []
         self.risk_log = []
@@ -421,30 +426,30 @@ class DynamicStrategy:
                         prem_cut = min(prem_cut, c)
         corr_cut = self._corr_mult(dt)
         out = {
-            "159232": FLOOR["159232"] + split_d["159232"] * d,
-            "515100": FLOOR["515100"] + split_d["515100"] * d,
-            "159941": FLOOR["159941"] + split_g["159941"] * g,
-            "513500": FLOOR["513500"] + split_g["513500"] * g,
-            "159952": FLOOR["159952"] + split_g["159952"] * g,
+            "159232": self.floor["159232"] + split_d["159232"] * d,
+            "515100": self.floor["515100"] + split_d["515100"] * d,
+            "159941": self.floor["159941"] + split_g["159941"] * g,
+            "513500": self.floor["513500"] + split_g["513500"] * g,
+            "159952": self.floor["159952"] + split_g["159952"] * g,
         }
         m_cn_g, m_cn_all = self._market_mult(dt, "CN")
         m_us_g, m_us_all = self._market_mult(dt, "US")
         # CN弹性: 成长仓受快刹车+闸门; 防御弹性只受深熊锁定
-        out["159952"] = FLOOR["159952"] + (out["159952"] - FLOOR["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut
-        out["159232"] = FLOOR["159232"] + (out["159232"] - FLOOR["159232"]) * m_cn_all
-        out["515100"] = FLOOR["515100"] + (out["515100"] - FLOOR["515100"]) * m_cn_all
+        out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut
+        out["159232"] = self.floor["159232"] + (out["159232"] - self.floor["159232"]) * m_cn_all
+        out["515100"] = self.floor["515100"] + (out["515100"] - self.floor["515100"]) * m_cn_all
         if us_split is not None:
-            us_total = (out["159941"] - FLOOR["159941"] + out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
-            out["159941"] = FLOOR["159941"] + us_total * us_split["159941"]
-            out["513500"] = FLOOR["513500"] + us_total * us_split["513500"]
+            us_total = (out["159941"] - self.floor["159941"] + out["513500"] - self.floor["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
+            out["159941"] = self.floor["159941"] + us_total * us_split["159941"]
+            out["513500"] = self.floor["513500"] + us_total * us_split["513500"]
         else:
             prem_freed = 0.0
             if self.premium_rotate and prem_cut < 1.0:
-                prem_freed = (1.0 - prem_cut) * (out["159941"] - FLOOR["159941"] + out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * corr_cut
-            out["159941"] = FLOOR["159941"] + (out["159941"] - FLOOR["159941"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
-            out["513500"] = FLOOR["513500"] + (out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
+                prem_freed = (1.0 - prem_cut) * (out["159941"] - self.floor["159941"] + out["513500"] - self.floor["513500"]) * m_us_g * m_us_all * vg_us * corr_cut
+            out["159941"] = self.floor["159941"] + (out["159941"] - self.floor["159941"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
+            out["513500"] = self.floor["513500"] + (out["513500"] - self.floor["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
             if prem_freed > 0:
-                out["159952"] = FLOOR["159952"] + (out["159952"] - FLOOR["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut + prem_freed * m_cn_g * m_cn_all
+                out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut + prem_freed * m_cn_g * m_cn_all
         return out
 
     def regular_target(self, dt, ctx):
@@ -472,22 +477,22 @@ class DynamicStrategy:
                 if dd < thr and (self.dd_cap_unconditional or sc < 6):
                     cap = min(cap, c)
             if cap < 1.0:
-                total_flex = sum(out[s] - FLOOR[s] for s in SLOTS)
-                scale = min(scale, max(0.0, (cap - FLOOR_EQ) / max(total_flex, 1e-9)))
+                total_flex = sum(out[s] - self.floor[s] for s in SLOTS)
+                scale = min(scale, max(0.0, (cap - self.floor_eq) / max(total_flex, 1e-9)))
         if scale < 1.0:
             for s in SLOTS:
-                out[s] = FLOOR[s] + (out[s] - FLOOR[s]) * scale
+                out[s] = self.floor[s] + (out[s] - self.floor[s]) * scale
         self.risk_log.append((dt, sc, scale))
         return self._finalize(out)
 
     def target_with_eq_cap(self, dt, ctx, cap_pct):
         sc = self._eff_score(dt)
         out = self._base_target(dt, sc)
-        total_flex = sum(out[s] - FLOOR[s] for s in SLOTS)
-        scale = max(0.0, (cap_pct - FLOOR_EQ) / max(total_flex, 1e-9))
+        total_flex = sum(out[s] - self.floor[s] for s in SLOTS)
+        scale = max(0.0, (cap_pct - self.floor_eq) / max(total_flex, 1e-9))
         if scale < 1.0:
             for s in SLOTS:
-                out[s] = FLOOR[s] + (out[s] - FLOOR[s]) * scale
+                out[s] = self.floor[s] + (out[s] - self.floor[s]) * scale
         return self._finalize(out)
 
     def _finalize(self, out):
@@ -497,7 +502,11 @@ class DynamicStrategy:
         if 100 - cash > self.max_eq * 100:
             cash = (1 - self.max_eq) * 100
         eq = 100.0 - cash
-        for s in SLOTS:
-            out[s] = out[s] * (eq / total) / 100.0
+        if total <= 1e-9:  # 底仓=0且弹性=0(极端深熊全锁)
+            for s in SLOTS:
+                out[s] = 0.0
+        else:
+            for s in SLOTS:
+                out[s] = out[s] * (eq / total) / 100.0
         out["cash"] = cash / 100.0
         return out

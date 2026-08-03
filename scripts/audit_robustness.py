@@ -11,16 +11,18 @@ from data_prep import build_panel
 from engine import run_backtest, evaluate
 from strategy import DynamicStrategy
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "out")
 CFG = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "out/final_cfg_v15.json"))
 TAG = sys.argv[2] if len(sys.argv) > 2 else "v15"
+TW = json.loads(sys.argv[3]) if len(sys.argv) > 3 else None  # 如 [1.0] 测1笔立即执行
 R, W = build_panel("proxy")
 START = "2014-06-23"
 
 def run(cfg):
     ds = DynamicStrategy(R, cfg=cfg)
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(),
-                       start=START, name="DYN", min_delta=cfg.get("min_delta", 0.02), repo=cfg.get("repo_rate", 0.022))
+                       start=START, name="DYN", min_delta=cfg.get("min_delta", 0.02), repo=cfg.get("repo_rate", 0.022),
+                       tranche_weights=TW)
     e = evaluate(res)
     return dict(cagr=e["cagr"]*100, mdd=e["max_dd"]*100, sharpe=e["sharpe"],
                 calmar=e["calmar"], turnover=e["turnover"], cash=e["avg_cash"]*100)
@@ -46,6 +48,13 @@ def mut_state_map(cfg, f):
 def mut_dd_eq_cap(cfg, f):
     c = copy.deepcopy(cfg)
     c["dd_eq_cap"] = [[round(thr * f, 4), int(cap)] for thr, cap in c["dd_eq_cap"]]
+    return c
+
+def mut_floor(cfg, key, f):
+    c = copy.deepcopy(cfg)
+    fp = dict(c.get("floor_pct", {"cn": 15.0, "us": 15.0}))
+    fp[key] = max(0.0, round(fp[key] * f, 4))
+    c["floor_pct"] = fp
     return c
 
 def mut_market_dd(cfg, mkt, f):
@@ -76,6 +85,8 @@ PERTURBS = [
     ("speed_brake_cut", lambda c, f: mut_scalar(c, "speed_brake_cut", f)),
     ("speed_brake_recover", lambda c, f: mut_scalar(c, "speed_brake_recover", f)),
     ("min_delta", lambda c, f: mut_scalar(c, "min_delta", f)),
+    ("floor_cn", lambda c, f: mut_floor(c, "cn", f)),
+    ("floor_us", lambda c, f: mut_floor(c, "us", f)),
 ]
 FACTORS = [0.8, 0.9, 1.1, 1.2]
 

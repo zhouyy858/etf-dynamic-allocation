@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """压力测试: 三情景(牛市/震荡/熊市) + 新增跨境共振熊市(合成冲击)
-对比 DYN v10(旧) vs DYN v15(3周三笔) vs DYN v17(周三1笔立即执行)
+对比 DYN v10(旧) vs DYN v15(3周三笔) vs DYN v17(1笔) vs DYN v18(1笔+底仓5+5)
 每周三决策、DYN v17 当日一笔成交(原分3周三笔各1/3已被替代)
 合成共振: 取真实双牛窗口2024-09~2026-07, 人为将美股收益缩放到窗口累计-30%、
 A股缩放到-20%、沪深300缩放到-25%(信号一致), 检验极端共振下的防守
@@ -18,6 +18,7 @@ SKILL_REF = os.path.join(HERE, "..", "references")
 CFG10 = json.load(open(f"{SKILL_REF}/final_cfg_v10.json"))
 CFG14 = json.load(open(f"{SKILL_REF}/final_cfg_v15.json"))
 CFG17 = json.load(open(f"{SKILL_REF}/final_cfg_v17.json"))
+CFG18 = json.load(open(f"{SKILL_REF}/final_cfg_v18.json"))
 REPO = 0.022
 
 BENCHMARKS = {
@@ -95,6 +96,7 @@ def main():
         r10 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG10, min_delta=0.002, label="DYN v10")
         r14 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG14, min_delta=0.02, label="DYN v15", repo=REPO)
         r17 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG17, min_delta=0.02, label="DYN v17", repo=REPO, tweights=CFG17.get("tranche_weights"))
+        r18 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG18, min_delta=0.02, label="DYN v18", repo=REPO, tweights=CFG18.get("tranche_weights"))
         merged = {}
         for k, e in r10.items():
             merged[k] = e
@@ -102,8 +104,10 @@ def main():
             merged["v15_" + k] = e
         for k, e in r17.items():
             merged[k] = e  # 覆盖同名基准行(值相同), 新增 DYN v17 主行
+        for k, e in r18.items():
+            merged[k] = e  # 新增 DYN v18 主行
         results[name] = merged
-        for k in ["DYN v10", "DYN v15", "DYN v17"] + list(BENCHMARKS.keys()):
+        for k in ["DYN v10", "DYN v15", "DYN v17", "DYN v18"] + list(BENCHMARKS.keys()):
             if k in merged:
                 e = merged[k]
                 print(f"  {k:<18} CAGR={e['cagr']*100:7.2f}%  MDD={e['max_dd']*100:6.2f}%  "

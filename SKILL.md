@@ -5,14 +5,14 @@ metadata:
   short-description: 五只ETF每周三动态调仓回测与执行手册
 ---
 
-# ETF 动态配置策略（v11 定稿）
+# ETF 动态配置策略（v13 定稿）
 
 ## 概述
 
 双市场（A股/美股）趋势打分驱动的动态配置，标的固定为 159232/515100/159941/513500/159952。
-最终结果（v11，2026-07-31 数据）：全历史 2014-2026 CAGR 12.39% / MDD -14.92% / Sharpe 1.08 / Calmar 0.83；真实 ETF 牛市窗口 25.38% / -6.55% / Calmar 3.87。
-v11 相对 v10 改进：牛市档位权益上调（状态9 成长 86→92）、组合回撤断路器改为无条件触发（-8%→权益≤85%、-12%→75%、-16%→65%、-20%→55%）、国内防御双持轮动（159232 vs 515100 按 60 日相对动量在 35:65~65:35 之间分配）、现金缓冲降至 3%、波动率目标 0.19。完整参数见 `references/final_cfg_v11.json`。
-完整参数与结论见 `references/investment_manual.md`、`references/final_cfg_v11.json`。
+最终结果（v13，2026-07-31 数据）：全历史 2014-2026 CAGR 13.21% / MDD -14.99% / Sharpe 1.20 / Calmar 0.88；真实 ETF 牛市窗口 28.04% / -5.61% / Sharpe 2.16 / Calmar 5.00。
+v13 相对 v11 改进：① **QDII 溢价门控**（159941/513500 场内溢价 >5%→海外成长弹性×0.6、>8%→×0.3、>12%→×0.15，用前一日溢价、无未来函数），真实窗口 Sharpe 1.84→2.16、MDD -6.55%→-5.61%；② **调仓缺口门槛 min_delta=0.02**（微小调仓跳过，减少无谓换手与回摆），真实窗口 CAGR 25.38%→28.04%；③ 压力测试新增跨境共振熊市合成情景（US 累计-30% + A股-20%），DYN v13 回撤 -13.1% vs 静态基准 -26~-40%。完整参数见 `references/final_cfg_v13.json`。
+完整参数与结论见 `references/investment_manual.md`、`references/final_cfg_v13.json`。
 
 ## 硬性业务约束（回测与执行必须遵守，不得简化）
 
@@ -28,7 +28,7 @@ v11 相对 v10 改进：牛市档位权益上调（状态9 成长 86→92）、�
 
 1. **资料获取**：确认数据最新日（`assets/data/panel_proxy_rets.csv` / `panel_real_rets.csv`）；数据过期时运行 `scripts/fetch_*.py` 刷新。
 2. **数据分析**：统计各标的收益率/波动率/最大回撤/相关性/滚动夏普；校验跨市场相关性（A股/美股）与极端行情传导。
-3. **组合构建**：默认使用 `references/final_cfg_v11.json`；如需优化用 `scripts/search.py` 做参数搜索（评分：全历史 Calmar 优先，约束真实窗口 CAGR>=20% 且 MDD>=-10%）。
+3. **组合构建**：默认使用 `references/final_cfg_v13.json`；如需优化用 `scripts/search.py` 做参数搜索（评分：全历史 Calmar 优先，约束真实窗口 CAGR>=20% 且 MDD>=-10%）。
 4. **历史回测**：`scripts/run_backtest.py`（周三决策→三周三笔成交、无未来函数、费用与逆回购计入）；输出 DYN 与 B1-B7 静态基准对比 + 分阶段表现 + 仓位现状 + 终端图表。
 5. **压力测试**：`scripts/stress_test.py` 三情景（牛市/震荡/熊市）+ 跨市场相关性校验。
 6. **严格自我评审**：逐条批判收益漏洞、最大回撤隐患、风格冲突、调仓缺陷、假设风险；生成待优化清单。
@@ -39,7 +39,7 @@ v11 相对 v10 改进：牛市档位权益上调（状态9 成长 86→92）、�
 ```bash
 PY=python3   # 需 pandas/numpy；如用 Codex runtime: /Users/mac/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3
 cd <你的工作目录>
-$PY /path/to/skill/scripts/run_backtest.py <cfg.json或默认v10> <tag>
+$PY /path/to/skill/scripts/run_backtest.py <cfg.json或默认v13> <tag>
 $PY /path/to/skill/scripts/stress_test.py
 $PY /path/to/skill/scripts/search.py 120 23
 ```
@@ -59,14 +59,14 @@ $PY /path/to/skill/scripts/search.py 120 23
 ## 策略核心（简述，细节看手册）
 
 - **打分**：沪深300 与创业板指各「收盘>120/60/20日均线」×3 + 纳指与标普「>120日均线」×2 + 纳指「>60日均线」×1 = 0-9 分；向上平滑 0.58、向下 0.18。
-- **状态骨架**：`state_map`（v11）9 分→成长92/防御4 … 0 分→成长11/防御30；状态 3-9 用成长拆分 159952:159941:513500 = 36:48:20，状态 0-2 用 44:36:20；防御弹性在 159232/515100 间按 60 日相对动量轮动（clamp 35:65~65:35）。
-- **风控层级**：结构闸门（破 120 日线→该市场成长弹性×0）；快刹车（CN 回撤>7%/US>10% 且破 SMA20→成长仓×0.08/×0.12）；深熊锁定（CN 回撤>22%/US>24%→该市场弹性全清只留 15% 底仓）；组合回撤上限（-12%/-18%/-25%→权益 80%/65%/50%，打分<6 时）；波动率目标 18%。
+- **状态骨架**：`state_map`（v13）9 分→成长92/防御4 … 0 分→成长11/防御30；状态 3-9 用成长拆分 159952:159941:513500 = 36:48:20，状态 0-2 用 44:36:20；防御弹性在 159232/515100 间按 60 日相对动量轮动（clamp 35:65~65:35）。
+- **风控层级**：结构闸门（破 120 日线→该市场成长弹性×0）；快刹车（CN 回撤>7%/US>10% 且破 SMA20→成长仓×0.08/×0.12）；深熊锁定（CN 回撤>22%/US>24%→该市场弹性全清只留 15% 底仓）；组合回撤上限（-12%/-18%/-25%→权益 80%/65%/50%，打分<6 时）；波动率目标 18%；**QDII 溢价门控**（溢价>5/8/12%→海外成长弹性×0.6/0.3/0.15）。
 - **回撤口径**：市场回撤用 3 年滚动窗口（755 交易日）峰值，禁止用全历史峰值（会导致 CN 成长仓永久锁死）。
 - **验收边界（诚实）**：全历史（含三轮大熊）无法同时达到 20% 年化与 <10% 回撤（前沿约 12%/-15%）；牛市情景 25.2%/-6.4% 达标。任何"全周期 20%+10%"宣称都是数据操纵或满仓赌注。
 
 ## 参考文件
 
 - `references/investment_manual.md`：完整投资手册（权重表/触发阈值/三周三笔细则/牛熊切换/止盈/逆回购/QDII 对策/压力测试/残余风险）。
-- `references/final_cfg_v11.json`：定稿参数（run_backtest 默认加载）。
-- `references/iterations.json`：v10→v11 迭代进展；`references/stress_test.json`：三情景压力测试；`references/risk_analysis.json`：相关性/极端窗口。
+- `references/final_cfg_v13.json`：定稿参数（run_backtest 默认加载）。
+- `references/iterations.json`：v10→v13 迭代进展；`references/stress_test.json`：三情景压力测试 + 合成共振熊市；`references/risk_analysis.json`：相关性/极端窗口。
 - `assets/data/`：回测数据面板（代理 2014 起 + 真实 2025-04 起）。

@@ -11,7 +11,7 @@ from engine import run_backtest
 from strategy import DynamicStrategy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v10.json")
+CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v13.json")
 NAMES = {"159232": "自由现金流", "515100": "红利低波100", "159941": "纳指100",
          "513500": "标普500", "159952": "创业板"}
 SLOTS = ["159232", "515100", "159941", "513500", "159952"]
@@ -69,6 +69,27 @@ def main():
         action = f"非调仓日；处于3周过渡期（最大偏差 {pct(gap)}），等待下一个周三执行下一笔"
     else:
         action = "非调仓日，仓位与目标基本一致，仅观察"
+    # ---- QDII 溢价监控 (场内价/单位净值-1) ----
+    prem_info = []
+    for code, nm in [("159941", "纳指100"), ("513500", "标普500")]:
+        try:
+            px = pd.read_csv(os.path.join(DATA_DIR, f"qdii_price_{code}.csv"), parse_dates=["date"]).set_index("date")["close"].sort_index()
+            nav = pd.read_csv(os.path.join(DATA_DIR, f"{code}_nav.csv"), parse_dates=["date"]).set_index("date")
+            nav = nav[~nav.index.duplicated(keep="last")].sort_index()["unit_nav"]
+            df = pd.concat([px.rename("px"), nav.rename("nav")], axis=1).dropna()
+            if code == "159941" and "2022-07-04" in df.index:
+                df = df.drop("2022-07-04")
+            prem = float(df["px"].iloc[-1] / df["nav"].iloc[-1] - 1)
+            flag = "⚠️高溢价,买入暂缓" if prem > 0.05 else ("注意" if prem > 0.03 else "正常")
+            prem_info.append(f"{nm}({code}) {pct(prem, 2)} {flag}")
+        except Exception:
+            pass
+    if prem_info:
+        lines.append("## QDII溢价监控（场内买入成本）")
+        lines.append("")
+        for t in prem_info:
+            lines.append(f"- {t}")
+        lines.append("")
     lines.append("## 今日动作")
     lines.append("")
     lines.append(action)
@@ -85,7 +106,7 @@ def main():
     lines.append(f"- 上一交易日: {pct(last_ret, 2)} ｜ 近5日: {pct(r5, 2)} ｜ 近20日: {pct(r20, 2)}")
     lines.append(f"- 今年以来: {pct(ytd, 2) if ytd == ytd else 'n/a'} ｜ 当前距历史高点: {pct(cur_dd, 2)}")
     lines.append("")
-    lines.append("> 生成: ETF动态配置skill v10 ｜ 仅供参考，非投资建议")
+    lines.append("> 生成: ETF动态配置skill v13（含QDII溢价门控5/8/12% + 调仓缺口门槛2%）｜ 仅供参考，非投资建议")
     text = "\n".join(lines)
     print(text)
     if out_path:

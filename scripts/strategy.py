@@ -9,6 +9,9 @@
 import os, numpy as np, pandas as pd
 from data_prep import DATA_DIR
 
+def _data(fn):
+    return os.path.join(DATA_DIR, fn)
+
 SLOTS = ["159232", "515100", "159941", "513500", "159952"]
 FLOOR = {"159232": 7.5, "515100": 7.5, "159941": 7.5, "513500": 7.5, "159952": 0.0}
 FLOOR_EQ = 30.0
@@ -23,6 +26,14 @@ DEFENSE_SPLIT = {"159232": 0.45, "515100": 0.55}
 DEFENSE_MOMENTUM_WIN = 60
 DEFENSE_MOMENTUM_T = 3.0
 DEFENSE_CLAMP = (0.35, 0.65)
+US_SPLIT_CLAMP = (0.55, 0.85)
+VALUATION_WIN_DAYS = 2520
+# QDII 溢价门控: 场内价/净值-1(>阈值削减海外成长弹性), 数据为前一日溢价(无未来函数)
+PREMIUM_FILES = {"159941": "qdii_price_159941.csv", "513500": "qdii_price_513500.csv"}
+PREMIUM_SPLIT_DROP = {"159941": "2022-07-04"}  # 4:1份额折算过渡日剔除
+PREMIUM_CLIP = (-0.10, 0.15)
+PREMIUM_THR = [0.03, 0.05, 0.08]
+PREMIUM_CUT = [0.5, 0.25, 0.1]
 
 VOL_TARGET = 0.18
 MIN_CASH = 0.05
@@ -33,8 +44,11 @@ DD_EQ_CAP = [(-0.12, 80), (-0.18, 65), (-0.25, 50)]
 HYST_UP, HYST_DOWN = 0.54, 0.17
 
 class SignalSet:
-    def __init__(self, R):
-        hs300 = pd.read_csv(os.path.join(DATA_DIR, "index_sh000300.csv"), parse_dates=["date"]).set_index("date")["close"].sort_index()
+    def __init__(self, R, a_mkt_override=None):
+        if a_mkt_override is not None:
+            hs300 = a_mkt_override
+        else:
+            hs300 = pd.read_csv(_data("index_sh000300.csv"), parse_dates=["date"]).set_index("date")["close"].sort_index()
         lvl = {}
         for s in SLOTS:
             lvl[s] = (1 + R[s].dropna()).cumprod()
@@ -73,8 +87,8 @@ class SignalSet:
         return dd, bool(px > s20), bool(s20 > s60), rec, bool(px > sg)
 
 class DynamicStrategy:
-    def __init__(self, R_full, cfg=None):
-        self.sig = SignalSet(R_full)
+    def __init__(self, R_full, cfg=None, a_mkt_override=None):
+        self.sig = SignalSet(R_full, a_mkt_override=a_mkt_override)
         self.R = R_full
         cfg = cfg or {}
         sm = cfg.get("state_map", STATE_MAP)
@@ -94,10 +108,47 @@ class DynamicStrategy:
         self.defense_momentum_t = float(cfg.get("defense_momentum_t", DEFENSE_MOMENTUM_T))
         self.defense_clamp = tuple(cfg.get("defense_clamp", DEFENSE_CLAMP))
         self.dd_cap_unconditional = bool(cfg.get("dd_cap_unconditional", False))
+        self.us_rotation = bool(cfg.get("us_rotation", False))
+        self.us_split_clamp = tuple(cfg.get("us_split_clamp", US_SPLIT_CLAMP))
+        self.valuation_gate = bool(cfg.get("valuation_gate", False))
+        self.premium_gate = bool(cfg.get("premium_gate", False))
+        self.premium_thr = [float(x) for x in cfg.get("premium_thr", PREMIUM_THR)]
+        self.premium_cut = [float(x) for x in cfg.get("premium_cut", PREMIUM_CUT)]
+        self._premium = self._load_premium_panel(R_full) if self.premium_gate else None
+        self.valuation_win = int(cfg.get("valuation_win_days", VALUATION_WIN_DAYS))
+        self.valuation_thr = [float(x) for x in cfg.get("valuation_thr", [0.95, 0.98])]
+        self.valuation_cut = [float(x) for x in cfg.get("valuation_cut", [0.6, 0.35])]
+        self.downside_vol = bool(cfg.get("downside_vol", False))
         self._prev_eff = None
         self._lock = {"CN": False, "US": False}
         self.state_log = []
         self.risk_log = []
+
+    @staticmethod
+    def _load_premium_panel(R):
+        """QDII溢价=场内收盘/单位净值-1; 用前一日溢价, 剔除份额折算过渡日, 裁剪极端值"""
+        cols = {}
+        for code, fn in PREMIUM_FILES.items():
+            px = pd.read_csv(_data(fn), parse_dates=["date"]).set_index("date")["close"].sort_index()
+            nav = pd.read_csv(_data(f"{code}_nav.csv"), parse_dates=["date"]).set_index("date")
+            nav = nav[~nav.index.duplicated(keep="last")].sort_index()["unit_nav"]
+            df = pd.concat([px.rename("px"), nav.rename("nav")], axis=1).dropna()
+            p = df["px"] / df["nav"] - 1
+            if code in PREMIUM_SPLIT_DROP:
+                p = p.drop(pd.Timestamp(PREMIUM_SPLIT_DROP[code]), errors="ignore")
+            cols[code] = p.clip(*PREMIUM_CLIP).reindex(R.index).ffill()
+        out = pd.DataFrame(cols)
+        return out.shift(1)
+
+    def _premium_at(self, dt):
+        """返回决策日可用的前一日溢价(取两只QDII较高者, 保守); 无数据返回None"""
+        if self._premium is None or dt not in self._premium.index:
+            return None
+        row = self._premium.loc[dt]
+        vals = row.dropna()
+        if len(vals) == 0:
+            return None
+        return float(vals.max())
 
     def _defense_split(self, dt):
         """国内防御双持轮动: 159232(自由现金流) vs 515100(红利低波100) 按相对动量分配防御弹性"""
@@ -115,6 +166,47 @@ class DynamicStrategy:
         lo, hi = self.defense_clamp
         w232 = min(max(float(w232), lo), hi)
         return {"159232": w232, "515100": 1.0 - w232}
+
+    def _momentum_ratio(self, dt, a, b):
+        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        if i < self.defense_momentum_win or i >= len(self.R):
+            return None
+        seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
+        ga = float((1 + seg[a].fillna(0.0)).prod())
+        gb = float((1 + seg[b].fillna(0.0)).prod())
+        if ga <= 0 or gb <= 0:
+            return None
+        return ga ** self.defense_momentum_t / (ga ** self.defense_momentum_t + gb ** self.defense_momentum_t)
+
+    def _us_split(self, dt):
+        """海外腿内部轮动: 纳指(159941) vs 标普(513500) 按相对动量分配海外成长弹性"""
+        if not self.us_rotation:
+            return None
+        r = self._momentum_ratio(dt, "159941", "513500")
+        if r is None:
+            return None
+        lo, hi = self.us_split_clamp
+        r = min(max(float(r), lo), hi)
+        return {"159941": r, "513500": 1.0 - r}
+
+    def _valuation_gate(self, dt, market):
+        """估值分位门控(价格分位代理): 标的分位>阈值时削减对应市场弹性"""
+        if not self.valuation_gate:
+            return 1.0
+        code = "159941" if market == "US" else "159952"
+        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        if i < 260:
+            return 1.0
+        x = self.R[code].iloc[max(0, i - self.valuation_win + 1): i + 1].dropna()
+        if len(x) < 500:
+            return 1.0
+        lvl = (1 + x).cumprod()
+        pct = float((lvl <= lvl.iloc[-1]).mean())
+        cut = 1.0
+        for thr, c in zip(self.valuation_thr, self.valuation_cut):
+            if pct >= thr:
+                cut = min(cut, c)
+        return cut
 
     def target_fn(self):
         def fn(dt, R_prev, ctx):
@@ -179,6 +271,16 @@ class DynamicStrategy:
         g, d = self.state_map.get(sc, self.state_map[min(max(sc, 0), 9)])
         split_g = self.growth_split_bull if g >= 30 else self.growth_split_bear
         split_d = self._defense_split(dt)
+        us_split = self._us_split(dt)
+        vg_us = self._valuation_gate(dt, "US")
+        vg_cn = self._valuation_gate(dt, "CN")
+        prem_cut = 1.0
+        if self._premium is not None:
+            pm = self._premium_at(dt)
+            if pm is not None and pm > 0:
+                for thr, c in zip(self.premium_thr, self.premium_cut):
+                    if pm >= thr:
+                        prem_cut = min(prem_cut, c)
         out = {
             "159232": FLOOR["159232"] + split_d["159232"] * d,
             "515100": FLOOR["515100"] + split_d["515100"] * d,
@@ -189,11 +291,16 @@ class DynamicStrategy:
         m_cn_g, m_cn_all = self._market_mult(dt, "CN")
         m_us_g, m_us_all = self._market_mult(dt, "US")
         # CN弹性: 成长仓受快刹车+闸门; 防御弹性只受深熊锁定
-        out["159952"] = FLOOR["159952"] + (out["159952"] - FLOOR["159952"]) * m_cn_g * m_cn_all
+        out["159952"] = FLOOR["159952"] + (out["159952"] - FLOOR["159952"]) * m_cn_g * m_cn_all * vg_cn
         out["159232"] = FLOOR["159232"] + (out["159232"] - FLOOR["159232"]) * m_cn_all
         out["515100"] = FLOOR["515100"] + (out["515100"] - FLOOR["515100"]) * m_cn_all
-        out["159941"] = FLOOR["159941"] + (out["159941"] - FLOOR["159941"]) * m_us_g * m_us_all
-        out["513500"] = FLOOR["513500"] + (out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all
+        if us_split is not None:
+            us_total = (out["159941"] - FLOOR["159941"] + out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut
+            out["159941"] = FLOOR["159941"] + us_total * us_split["159941"]
+            out["513500"] = FLOOR["513500"] + us_total * us_split["513500"]
+        else:
+            out["159941"] = FLOOR["159941"] + (out["159941"] - FLOOR["159941"]) * m_us_g * m_us_all * vg_us * prem_cut
+            out["513500"] = FLOOR["513500"] + (out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut
         return out
 
     def regular_target(self, dt, ctx):
@@ -203,7 +310,12 @@ class DynamicStrategy:
         pf = ctx.get("pf_rets", pd.Series(dtype=float))
         scale = 1.0
         if len(pf) > 30:
-            ew = pf.ewm(halflife=20).std().iloc[-1] * np.sqrt(252)
+            if self.downside_vol:
+                neg = pf[pf < 0]
+                ew = (neg.ewm(halflife=20).std().iloc[-1] * np.sqrt(252)
+                      if len(neg) > 20 else pf.ewm(halflife=20).std().iloc[-1] * np.sqrt(252))
+            else:
+                ew = pf.ewm(halflife=20).std().iloc[-1] * np.sqrt(252)
             if ew > 0 and ew > self.vol_target * 1.15:
                 scale = min(scale, (self.vol_target * 1.15) / ew)
             wv = (1 + pf).cumprod()

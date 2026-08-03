@@ -11,7 +11,7 @@ from engine import run_backtest
 from strategy import DynamicStrategy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v15.json")
+CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v17.json")
 NAMES = {"159232": "自由现金流", "515100": "红利低波100", "159941": "纳指100",
          "513500": "标普500", "159952": "创业板"}
 SLOTS = ["159232", "515100", "159941", "513500", "159952"]
@@ -37,7 +37,8 @@ def main():
     cfg = json.load(open(CFG_FILE))
     R, W = build_panel("proxy")
     ds = DynamicStrategy(R, cfg=cfg)
-    res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23", min_delta=0.02, repo=0.022)
+    res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23", min_delta=0.02, repo=0.022,
+                       tranche_weights=cfg.get("tranche_weights"))
     wdf, rets = res["weights"], res["rets"]
     wealth = (1 + rets).cumprod()
     last = wdf.index[-1]
@@ -64,9 +65,9 @@ def main():
     is_wed = today.weekday() == 2
     gap = max(abs(w_act[s] - tgt[s]) for s in SLOTS + ["cash"])
     if is_wed:
-        action = "今日是周三调仓日：按三周三笔计划执行 1/3（QDII 溢价>2% 的买入顺延；下单前查 IOPV 溢价率）"
+        action = "今日是周三调仓日：按 v17 规则当日 1 笔成交到位（QDII 溢价>2% 的买入顺延；下单前查 IOPV 溢价率）"
     elif gap > 0.02:
-        action = f"非调仓日；处于3周过渡期（最大偏差 {pct(gap)}），等待下一个周三执行下一笔"
+        action = f"非调仓日，仓位与目标基本一致（最大偏差 {pct(gap)}），等待下一个周三检查"
     else:
         action = "非调仓日，仓位与目标基本一致，仅观察"
     # ---- QDII 溢价监控 (场内价/单位净值-1) ----
@@ -106,7 +107,7 @@ def main():
     lines.append(f"- 上一交易日: {pct(last_ret, 2)} ｜ 近5日: {pct(r5, 2)} ｜ 近20日: {pct(r20, 2)}")
     lines.append(f"- 今年以来: {pct(ytd, 2) if ytd == ytd else 'n/a'} ｜ 当前距历史高点: {pct(cur_dd, 2)}")
     lines.append("")
-    lines.append("> 生成: ETF动态配置skill v15（溢价门控+相关性风控+速度刹车+逆回购2.2%）｜ 仅供参考，非投资建议")
+    lines.append("> 生成: ETF动态配置skill v17（每周三1笔执行+溢价门控+相关性风控+速度刹车+逆回购2.2%）｜ 仅供参考，非投资建议")
     text = "\n".join(lines)
     print(text)
     if out_path:

@@ -61,7 +61,8 @@ def run_all(R, label, start, end, dyn_cfg):
     ds = DynamicStrategy(R, cfg=dyn_cfg)
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(),
                        start=start, end=end, name=f"DYN {label}",
-                       min_delta=dyn_cfg.get("min_delta", 0.02), repo=dyn_cfg.get("repo_rate", 0.022))
+                       min_delta=dyn_cfg.get("min_delta", 0.02), repo=dyn_cfg.get("repo_rate", 0.022),
+                       tranche_weights=dyn_cfg.get("tranche_weights"))
     results[f"DYN {label}"] = evaluate(res, periods=PERIODS)
     wealths[f"DYN {label}"] = res["wealth"]
     results["_weights"] = res["weights"]
@@ -160,7 +161,7 @@ def term_bars(rows, title, width=42):
 
 # ---------- 主流程 ----------
 def main():
-    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v15.json")
+    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v17.json")
     tag = sys.argv[2] if len(sys.argv) > 2 else "v10"
     cfg = json.load(open(cfg_file))
     print(f"===== 迭代 {tag} | 每周三调仓、每次目标分3周三笔(每周三1/3)、三周调整完 =====")

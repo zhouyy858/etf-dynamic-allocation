@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """回测引擎: 静态基准 + 动态策略
-统一约束: 每周三执行调仓; 每次目标调整分3笔、在决策当周及随后2个周三各执行1/3, 三周调整完;
-紧急风控任意交易日触发, 同样分3周三笔执行并取代未完成计划; 单边费万5; 闲置现金享逆回购收益
+统一约束: 每周三执行调仓; 分笔由tranche_weights配置(默认等分3笔: 决策当周及随后2个周三各1/3;
+v17用[1.0]=决策当日1笔全部成交); 紧急风控任意交易日触发并取代未完成计划; 单边费万5; 闲置现金享逆回购收益
 动态策略: 15%国内底仓 + 15%海外底仓固定不动; 弹性仓按牛熊信号切换; 波动率+回撤刹车"""
 import numpy as np, pandas as pd
 from metrics import TRADING_DAYS, annualized_ret, annualized_vol, max_drawdown, sharpe
@@ -13,7 +13,12 @@ SLOTS = ["159232", "515100", "159941", "513500", "159952"]
 
 def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weights=None,
                  start=None, end=None, tranches=TRANCHES, fee=FEE, repo=REPO,
-                 min_delta=0.002, name=""):
+                 min_delta=0.002, name="", tranche_weights=None):
+    """tranche_weights: 分笔比例列表(如[1.0]立即执行、[0.5,0.5]、[1/3]*3), 默认None=等分tranches笔"""
+    if tranche_weights is None:
+        tw = np.array([1.0 / tranches] * tranches)
+    else:
+        tw = np.array(tranche_weights, float); tw = tw / tw.sum()
     """顺序模拟回测。
     fixed_weights: 静态权重, 每周三调回目标(分3周三笔)。
     target_weights_fn(dt, R_up_to_prev, ctx): 动态目标权重(dict, 含cash)或None。
@@ -90,15 +95,16 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
             if i == 0 or np.abs(delta).max() >= min_delta:
                 if is_emergency:
                     pending = {}  # 紧急风控取代未完成计划
-                # 分3笔: 第1笔当日执行(按当日净值), 其余在随后2个周三各1笔
-                w = w + delta / tranches
-                turnover_day[i] += np.abs(delta).sum() / tranches
+                # 分笔: 第1笔当日执行(按当日净值), 其余在随后各决策周三分笔(比例按tranche_weights)
+                d0 = delta * tw[0]
+                w = w + d0
+                turnover_day[i] += np.abs(d0).sum()
                 j = i
-                for tt in range(1, tranches):
+                for t in range(1, len(tw)):
                     j = next_wed(j)
                     if j is None:
                         break
-                    pending.setdefault(j, []).append(delta / tranches)
+                    pending.setdefault(j, []).append(delta * tw[t])
         # 3) 组合收益(含费用), 并按当日收益更新权重漂移
         cash = 1.0 - w.sum()
         r = R.iloc[i].values

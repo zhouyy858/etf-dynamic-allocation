@@ -11,7 +11,7 @@ from engine import run_backtest
 from strategy import DynamicStrategy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v13.json")
+CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v14.json")
 NAMES = {"159232": "自由现金流", "515100": "红利低波100", "159941": "纳指100",
          "513500": "标普500", "159952": "创业板"}
 SLOTS = ["159232", "515100", "159941", "513500", "159952"]
@@ -37,7 +37,7 @@ def main():
     cfg = json.load(open(CFG_FILE))
     R, W = build_panel("proxy")
     ds = DynamicStrategy(R, cfg=cfg)
-    res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23")
+    res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23", min_delta=0.02, repo=0.022)
     wdf, rets = res["weights"], res["rets"]
     wealth = (1 + rets).cumprod()
     last = wdf.index[-1]
@@ -106,7 +106,7 @@ def main():
     lines.append(f"- 上一交易日: {pct(last_ret, 2)} ｜ 近5日: {pct(r5, 2)} ｜ 近20日: {pct(r20, 2)}")
     lines.append(f"- 今年以来: {pct(ytd, 2) if ytd == ytd else 'n/a'} ｜ 当前距历史高点: {pct(cur_dd, 2)}")
     lines.append("")
-    lines.append("> 生成: ETF动态配置skill v13（含QDII溢价门控5/8/12% + 调仓缺口门槛2%）｜ 仅供参考，非投资建议")
+    lines.append("> 生成: ETF动态配置skill v14（溢价门控+相关性风控+逆回购2.2%）｜ 仅供参考，非投资建议")
     text = "\n".join(lines)
     print(text)
     if out_path:

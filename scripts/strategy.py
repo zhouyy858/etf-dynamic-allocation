@@ -112,6 +112,14 @@ class DynamicStrategy:
         self.us_split_clamp = tuple(cfg.get("us_split_clamp", US_SPLIT_CLAMP))
         self.valuation_gate = bool(cfg.get("valuation_gate", False))
         self.premium_gate = bool(cfg.get("premium_gate", False))
+        self.corr_risk = bool(cfg.get("corr_risk", False))
+        self.corr_risk_win = int(cfg.get("corr_risk_win", 60))
+        self.corr_risk_thr = [float(x) for x in cfg.get("corr_risk_thr", [0.5, 0.65])]
+        self.corr_risk_cut = [float(x) for x in cfg.get("corr_risk_cut", [0.85, 0.65])]
+        self.recovery_ramp = bool(cfg.get("recovery_ramp", False))
+        self.recovery_ramp_min = float(cfg.get("recovery_ramp_min", 0.5))
+        self.vol_scale_hi = float(cfg.get("vol_scale_hi", 1.0))
+        self.vol_scale_lo = float(cfg.get("vol_scale_lo", 1.0))
         self.premium_thr = [float(x) for x in cfg.get("premium_thr", PREMIUM_THR)]
         self.premium_cut = [float(x) for x in cfg.get("premium_cut", PREMIUM_CUT)]
         self._premium = self._load_premium_panel(R_full) if self.premium_gate else None
@@ -149,6 +157,40 @@ class DynamicStrategy:
         if len(vals) == 0:
             return None
         return float(vals.max())
+
+    def _corr_mult(self, dt):
+        """跨市场相关性风控: CN(三只A股等权) vs US(两只QDII等权) 60日滚动相关
+        相关性越高 -> 跨市场共振下跌风险越大, 削减成长弹性(防御仓不动)"""
+        if not self.corr_risk:
+            return 1.0
+        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        if i < self.corr_risk_win or i >= len(self.R):
+            return 1.0
+        seg = self.R.iloc[i - self.corr_risk_win + 1: i + 1]
+        cn = (seg["159232"].fillna(0.0) + seg["515100"].fillna(0.0) + seg["159952"].fillna(0.0)) / 3
+        us = (seg["159941"].fillna(0.0) + seg["513500"].fillna(0.0)) / 2
+        if cn.std() < 1e-12 or us.std() < 1e-12:
+            return 1.0
+        c = float(np.corrcoef(cn, us)[0, 1])
+        if not np.isfinite(c):
+            return 1.0
+        cut = 1.0
+        for thr, cc in zip(self.corr_risk_thr, self.corr_risk_cut):
+            if c >= thr:
+                cut = min(cut, cc)
+        return cut
+
+    def _recovery_mult(self, dt, market):
+        """恢复度渐进: 深度回撤后按收复比例渐进恢复弹性, 避免V型反转过早满仓
+        仅在回撤中(-20%~-5%)生效: 收复比例rec低 -> 弹性受限; 创新高(rec≈1) -> 完全恢复"""
+        if not self.recovery_ramp:
+            return 1.0
+        dd, ok20, ok20_60, rec, ok120 = self.sig.mkt_info(dt, market, self.gate_win)
+        if dd >= -0.05:
+            return 1.0
+        if dd <= -0.20:
+            return 1.0  # 深跌区由快刹车/深熊锁处理
+        return max(self.recovery_ramp_min, min(1.0, rec / 0.5))
 
     def _defense_split(self, dt):
         """国内防御双持轮动: 159232(自由现金流) vs 515100(红利低波100) 按相对动量分配防御弹性"""
@@ -281,6 +323,7 @@ class DynamicStrategy:
                 for thr, c in zip(self.premium_thr, self.premium_cut):
                     if pm >= thr:
                         prem_cut = min(prem_cut, c)
+        corr_cut = self._corr_mult(dt)
         out = {
             "159232": FLOOR["159232"] + split_d["159232"] * d,
             "515100": FLOOR["515100"] + split_d["515100"] * d,
@@ -291,16 +334,16 @@ class DynamicStrategy:
         m_cn_g, m_cn_all = self._market_mult(dt, "CN")
         m_us_g, m_us_all = self._market_mult(dt, "US")
         # CN弹性: 成长仓受快刹车+闸门; 防御弹性只受深熊锁定
-        out["159952"] = FLOOR["159952"] + (out["159952"] - FLOOR["159952"]) * m_cn_g * m_cn_all * vg_cn
+        out["159952"] = FLOOR["159952"] + (out["159952"] - FLOOR["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut
         out["159232"] = FLOOR["159232"] + (out["159232"] - FLOOR["159232"]) * m_cn_all
         out["515100"] = FLOOR["515100"] + (out["515100"] - FLOOR["515100"]) * m_cn_all
         if us_split is not None:
-            us_total = (out["159941"] - FLOOR["159941"] + out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut
+            us_total = (out["159941"] - FLOOR["159941"] + out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
             out["159941"] = FLOOR["159941"] + us_total * us_split["159941"]
             out["513500"] = FLOOR["513500"] + us_total * us_split["513500"]
         else:
-            out["159941"] = FLOOR["159941"] + (out["159941"] - FLOOR["159941"]) * m_us_g * m_us_all * vg_us * prem_cut
-            out["513500"] = FLOOR["513500"] + (out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut
+            out["159941"] = FLOOR["159941"] + (out["159941"] - FLOOR["159941"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
+            out["513500"] = FLOOR["513500"] + (out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
         return out
 
     def regular_target(self, dt, ctx):
@@ -309,6 +352,7 @@ class DynamicStrategy:
         out = self._base_target(dt, sc)
         pf = ctx.get("pf_rets", pd.Series(dtype=float))
         scale = 1.0
+        vt_eff = self.vol_target * (self.vol_scale_hi if sc >= 6 else self.vol_scale_lo)
         if len(pf) > 30:
             if self.downside_vol:
                 neg = pf[pf < 0]
@@ -316,8 +360,8 @@ class DynamicStrategy:
                       if len(neg) > 20 else pf.ewm(halflife=20).std().iloc[-1] * np.sqrt(252))
             else:
                 ew = pf.ewm(halflife=20).std().iloc[-1] * np.sqrt(252)
-            if ew > 0 and ew > self.vol_target * 1.15:
-                scale = min(scale, (self.vol_target * 1.15) / ew)
+            if ew > 0 and ew > vt_eff * 1.15:
+                scale = min(scale, (vt_eff * 1.15) / ew)
             wv = (1 + pf).cumprod()
             dd = wv.iloc[-1] / wv.cummax().iloc[-1] - 1.0 if wv.cummax().iloc[-1] > 0 else 0.0
             cap = 1.0

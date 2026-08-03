@@ -20,6 +20,9 @@ STATE_MAP = {
 GROWTH_SPLIT_BULL = {"159952": 0.34, "159941": 0.48, "513500": 0.20}
 GROWTH_SPLIT_BEAR = {"159952": 0.44, "159941": 0.36, "513500": 0.20}
 DEFENSE_SPLIT = {"159232": 0.45, "515100": 0.55}
+DEFENSE_MOMENTUM_WIN = 60
+DEFENSE_MOMENTUM_T = 3.0
+DEFENSE_CLAMP = (0.35, 0.65)
 
 VOL_TARGET = 0.18
 MIN_CASH = 0.05
@@ -72,6 +75,7 @@ class SignalSet:
 class DynamicStrategy:
     def __init__(self, R_full, cfg=None):
         self.sig = SignalSet(R_full)
+        self.R = R_full
         cfg = cfg or {}
         sm = cfg.get("state_map", STATE_MAP)
         self.state_map = {int(k): tuple(v) for k, v in sm.items()}
@@ -85,10 +89,32 @@ class DynamicStrategy:
         self.gate_win = cfg.get("gate_win", 120)
         self.growth_split_bull = dict(cfg.get("growth_split_bull", GROWTH_SPLIT_BULL))
         self.growth_split_bear = dict(cfg.get("growth_split_bear", GROWTH_SPLIT_BEAR))
+        self.defense_momentum = bool(cfg.get("defense_momentum", False))
+        self.defense_momentum_win = int(cfg.get("defense_momentum_win", DEFENSE_MOMENTUM_WIN))
+        self.defense_momentum_t = float(cfg.get("defense_momentum_t", DEFENSE_MOMENTUM_T))
+        self.defense_clamp = tuple(cfg.get("defense_clamp", DEFENSE_CLAMP))
+        self.dd_cap_unconditional = bool(cfg.get("dd_cap_unconditional", False))
         self._prev_eff = None
         self._lock = {"CN": False, "US": False}
         self.state_log = []
         self.risk_log = []
+
+    def _defense_split(self, dt):
+        """国内防御双持轮动: 159232(自由现金流) vs 515100(红利低波100) 按相对动量分配防御弹性"""
+        if not self.defense_momentum:
+            return dict(DEFENSE_SPLIT)
+        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        if i < self.defense_momentum_win or i >= len(self.R):
+            return dict(DEFENSE_SPLIT)
+        seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
+        g232 = float((1 + seg["159232"].fillna(0.0)).prod())
+        g100 = float((1 + seg["515100"].fillna(0.0)).prod())
+        if g232 <= 0 or g100 <= 0:
+            return dict(DEFENSE_SPLIT)
+        w232 = g232 ** self.defense_momentum_t / (g232 ** self.defense_momentum_t + g100 ** self.defense_momentum_t)
+        lo, hi = self.defense_clamp
+        w232 = min(max(float(w232), lo), hi)
+        return {"159232": w232, "515100": 1.0 - w232}
 
     def target_fn(self):
         def fn(dt, R_prev, ctx):
@@ -105,7 +131,7 @@ class DynamicStrategy:
             sc = self.sig.score(dt)
             cap = 1.0
             for thr, c in self.dd_eq_cap:
-                if dd < thr and sc < 6:
+                if dd < thr and (self.dd_cap_unconditional or sc < 6):
                     cap = min(cap, c)
             # 市场级风控: 目标权益比当前显著低(深熊锁/快刹车/结构闸门生效) -> 日度触发, 仍分3周三笔
             base = self._base_target(dt, sc)
@@ -152,9 +178,10 @@ class DynamicStrategy:
     def _base_target(self, dt, sc):
         g, d = self.state_map.get(sc, self.state_map[min(max(sc, 0), 9)])
         split_g = self.growth_split_bull if g >= 30 else self.growth_split_bear
+        split_d = self._defense_split(dt)
         out = {
-            "159232": FLOOR["159232"] + DEFENSE_SPLIT["159232"] * d,
-            "515100": FLOOR["515100"] + DEFENSE_SPLIT["515100"] * d,
+            "159232": FLOOR["159232"] + split_d["159232"] * d,
+            "515100": FLOOR["515100"] + split_d["515100"] * d,
             "159941": FLOOR["159941"] + split_g["159941"] * g,
             "513500": FLOOR["513500"] + split_g["513500"] * g,
             "159952": FLOOR["159952"] + split_g["159952"] * g,
@@ -183,7 +210,7 @@ class DynamicStrategy:
             dd = wv.iloc[-1] / wv.cummax().iloc[-1] - 1.0 if wv.cummax().iloc[-1] > 0 else 0.0
             cap = 1.0
             for thr, c in self.dd_eq_cap:
-                if dd < thr and sc < 6:
+                if dd < thr and (self.dd_cap_unconditional or sc < 6):
                     cap = min(cap, c)
             if cap < 1.0:
                 total_flex = sum(out[s] - FLOOR[s] for s in SLOTS)

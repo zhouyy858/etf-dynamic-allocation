@@ -159,7 +159,7 @@ def term_bars(rows, title, width=42):
 
 # ---------- 主流程 ----------
 def main():
-    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v14.json")
+    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v15.json")
     tag = sys.argv[2] if len(sys.argv) > 2 else "v10"
     cfg = json.load(open(cfg_file))
     print(f"===== 迭代 {tag} | 每周三调仓、每次目标分3周三笔(每周三1/3)、三周调整完 =====")

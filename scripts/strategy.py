@@ -120,6 +120,16 @@ class DynamicStrategy:
         self.recovery_ramp_min = float(cfg.get("recovery_ramp_min", 0.5))
         self.vol_scale_hi = float(cfg.get("vol_scale_hi", 1.0))
         self.vol_scale_lo = float(cfg.get("vol_scale_lo", 1.0))
+        self.speed_brake = bool(cfg.get("speed_brake", False))
+        self.speed_brake_win = int(cfg.get("speed_brake_win", 5))
+        self.speed_brake_thr = float(cfg.get("speed_brake_thr", -0.04))
+        self.speed_brake_cut = float(cfg.get("speed_brake_cut", 0.6))
+        self.speed_brake_recover = int(cfg.get("speed_brake_recover", 8))
+        self._speed_brake_on = 0
+        self.growth_rotation = bool(cfg.get("growth_rotation", False))
+        self.growth_rotation_win = int(cfg.get("growth_rotation_win", 60))
+        self.growth_rotation_t = float(cfg.get("growth_rotation_t", 2.0))
+        self.growth_clamp = [float(x) for x in cfg.get("growth_clamp", [0.08, 0.60])]
         self.premium_thr = [float(x) for x in cfg.get("premium_thr", PREMIUM_THR)]
         self.premium_cut = [float(x) for x in cfg.get("premium_cut", PREMIUM_CUT)]
         self._premium = self._load_premium_panel(R_full) if self.premium_gate else None
@@ -157,6 +167,40 @@ class DynamicStrategy:
         if len(vals) == 0:
             return None
         return float(vals.max())
+
+    def _growth_split(self, dt, base):
+        """论坛方向: 跨市场成长相对动量轮动(创业板/纳指/标普)
+        按60日趋势强度(收盘/SMA20-1)的t次幂分配成长弹性, 单只clamp防止过度集中
+        替代固定 growth_split_bull/bear"""
+        if not self.growth_rotation:
+            return base
+        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        if i < self.growth_rotation_win or i >= len(self.R):
+            return base
+        codes = ["159952", "159941", "513500"]
+        seg = self.R.iloc[i - self.growth_rotation_win + 1: i + 1]
+        lvl = {c: float((1 + seg[c].fillna(0.0)).prod()) for c in codes}
+        strengths = {}
+        for c in codes:
+            s = (1 + self.R[c].iloc[max(0, i-19): i + 1].fillna(0.0)).prod()
+            strengths[c] = (s - 1.0) * 100.0  # 20日动量%
+        w = {}
+        tot = 0.0
+        for c in codes:
+            k = max(lvl[c], 1e-9) ** self.growth_rotation_t * max(1.0 + strengths[c] / 5.0, 0.1)
+            w[c] = k
+            tot += k
+        lo, hi = self.growth_clamp
+        out = {}
+        for c in codes:
+            out[c] = min(max(w[c] / tot, lo), hi)
+        # 归一化到和 base 总成长弹性一致
+        base_total = sum(base.get(c, 0.0) for c in codes)
+        s = sum(out.values())
+        if s > 0:
+            for c in codes:
+                out[c] = out[c] / s * base_total
+        return out
 
     def _corr_mult(self, dt):
         """跨市场相关性风控: CN(三只A股等权) vs US(两只QDII等权) 60日滚动相关
@@ -263,6 +307,17 @@ class DynamicStrategy:
             wv = (1 + pf).cumprod()
             dd = wv.iloc[-1] / wv.cummax().iloc[-1] - 1.0 if wv.cummax().iloc[-1] > 0 else 0.0
             sc = self.sig.score(dt)
+            # 速度刹车: 组合急跌(近N日)且处于回撤中 -> 日度减成长弹性, 反弹或N日后自动恢复
+            if self.speed_brake and len(pf) >= self.speed_brake_win:
+                rn = float((1 + pf.iloc[-self.speed_brake_win:]).prod() - 1.0)
+                if rn < self.speed_brake_thr and dd < -0.03:
+                    self._speed_brake_on = self.speed_brake_recover
+                if self._speed_brake_on > 0:
+                    self._speed_brake_on -= 1
+                    base = self._base_target(dt, sc)
+                    cur = float(ctx.get("equity", 1.0))
+                    eq_cap = cur * self.speed_brake_cut
+                    return self.target_with_eq_cap(dt, ctx, eq_cap * 100)
             cap = 1.0
             for thr, c in self.dd_eq_cap:
                 if dd < thr and (self.dd_cap_unconditional or sc < 6):
@@ -313,6 +368,8 @@ class DynamicStrategy:
         g, d = self.state_map.get(sc, self.state_map[min(max(sc, 0), 9)])
         split_g = self.growth_split_bull if g >= 30 else self.growth_split_bear
         split_d = self._defense_split(dt)
+        if self.growth_rotation:
+            split_g = self._growth_split(dt, {"159952": split_g["159952"], "159941": split_g["159941"], "513500": split_g["513500"]})
         us_split = self._us_split(dt)
         vg_us = self._valuation_gate(dt, "US")
         vg_cn = self._valuation_gate(dt, "CN")

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """压力测试: 三情景(牛市/震荡/熊市) + 新增跨境共振熊市(合成冲击)
-对比 DYN v10(旧) vs DYN v14(当前最优: v11+QDII溢价门控+相关性风控+逆回购2.2%)
+对比 DYN v10(旧) vs DYN v15(当前最优: v11+QDII溢价门控+相关性风控+逆回购2.2%)
 每周三调仓、每次目标分3周三笔(每周三1/3)、三周调整完
 合成共振: 取真实双牛窗口2024-09~2026-07, 人为将美股收益缩放到窗口累计-30%、
 A股缩放到-20%、沪深300缩放到-25%(信号一致), 检验极端共振下的防守
@@ -16,7 +16,7 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "out"); os.
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_REF = os.path.join(HERE, "..", "references")
 CFG10 = json.load(open(f"{SKILL_REF}/final_cfg_v10.json"))
-CFG14 = json.load(open(f"{SKILL_REF}/final_cfg_v14.json"))
+CFG14 = json.load(open(f"{SKILL_REF}/final_cfg_v15.json"))
 REPO = 0.022
 
 BENCHMARKS = {
@@ -92,22 +92,22 @@ def main():
     for name, ps, pe, Rs, am in SCENARIOS:
         print(f"\n===== {name} ({ps} ~ {pe}) =====")
         r10 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG10, min_delta=0.002, label="DYN v10")
-        r14 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG14, min_delta=0.02, label="DYN v14", repo=REPO)
+        r14 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG14, min_delta=0.02, label="DYN v15", repo=REPO)
         merged = {}
         for k, e in r10.items():
             merged[k] = e
         for k, e in r14.items():
-            merged["v14_" + k] = e
+            merged["v15_" + k] = e
         results[name] = merged
-        for k in ["DYN v10", "DYN v14"] + list(BENCHMARKS.keys()):
+        for k in ["DYN v10", "DYN v15"] + list(BENCHMARKS.keys()):
             key = k if k in merged else None
             if key:
                 e = merged[key]
                 print(f"  {k:<18} CAGR={e['cagr']*100:7.2f}%  MDD={e['max_dd']*100:6.2f}%  "
                       f"Sharpe={e['sharpe']:.2f}  Calmar={e['calmar']:.2f}  total={e['total_ret']*100:8.2f}%")
             else:
-                e = merged.get("v14_" + k)
-                print(f"  v14_{k:<14} CAGR={e['cagr']*100:7.2f}%  MDD={e['max_dd']*100:6.2f}%  "
+                e = merged.get("v15_" + k)
+                print(f"  v15_{k:<14} CAGR={e['cagr']*100:7.2f}%  MDD={e['max_dd']*100:6.2f}%  "
                       f"Sharpe={e['sharpe']:.2f}  Calmar={e['calmar']:.2f}  total={e['total_ret']*100:8.2f}%")
     json.dump(results, open(f"{OUT}/stress_test.json", "w"), ensure_ascii=False, indent=2, default=str)
     print("\n[ok] out/stress_test.json")

@@ -60,7 +60,8 @@ def run_all(R, label, start, end, dyn_cfg):
     wealths["B7等权买持"] = res["wealth"]
     ds = DynamicStrategy(R, cfg=dyn_cfg)
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(),
-                       start=start, end=end, name=f"DYN {label}")
+                       start=start, end=end, name=f"DYN {label}",
+                       min_delta=dyn_cfg.get("min_delta", 0.02), repo=dyn_cfg.get("repo_rate", 0.022))
     results[f"DYN {label}"] = evaluate(res, periods=PERIODS)
     wealths[f"DYN {label}"] = res["wealth"]
     results["_weights"] = res["weights"]

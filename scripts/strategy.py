@@ -112,7 +112,9 @@ class DynamicStrategy:
         self.us_split_clamp = tuple(cfg.get("us_split_clamp", US_SPLIT_CLAMP))
         self.valuation_gate = bool(cfg.get("valuation_gate", False))
         self.premium_gate = bool(cfg.get("premium_gate", False))
+        self.premium_rotate = bool(cfg.get("premium_rotate", False))
         self.corr_risk = bool(cfg.get("corr_risk", False))
+        self.corr_conditional = bool(cfg.get("corr_conditional", False))
         self.corr_risk_win = int(cfg.get("corr_risk_win", 60))
         self.corr_risk_thr = [float(x) for x in cfg.get("corr_risk_thr", [0.5, 0.65])]
         self.corr_risk_cut = [float(x) for x in cfg.get("corr_risk_cut", [0.85, 0.65])]
@@ -120,6 +122,9 @@ class DynamicStrategy:
         self.recovery_ramp_min = float(cfg.get("recovery_ramp_min", 0.5))
         self.vol_scale_hi = float(cfg.get("vol_scale_hi", 1.0))
         self.vol_scale_lo = float(cfg.get("vol_scale_lo", 1.0))
+        self.vol_buf = float(cfg.get("vol_buf", 1.15))
+        self.score_confirm = int(cfg.get("score_confirm_weeks", 0))
+        self._last_confirmed = None
         self.speed_brake = bool(cfg.get("speed_brake", False))
         self.speed_brake_win = int(cfg.get("speed_brake_win", 5))
         self.speed_brake_thr = float(cfg.get("speed_brake_thr", -0.04))
@@ -218,6 +223,15 @@ class DynamicStrategy:
         c = float(np.corrcoef(cn, us)[0, 1])
         if not np.isfinite(c):
             return 1.0
+        # 条件化: 双市场均强势(收盘>60日均线)时豁免相关性折扣, 只在弱势/同跌风险期启用
+        if self.corr_conditional:
+            try:
+                ok_cn = bool(self.sig.a_mkt.iloc[i] > self.sig.sma["a_mkt"][60].iloc[i])
+                ok_us = bool(self.sig.u_m.iloc[i] > self.sig.sma["u_m"][60].iloc[i])
+                if ok_cn and ok_us:
+                    return 1.0
+            except (IndexError, KeyError):
+                pass
         cut = 1.0
         for thr, cc in zip(self.corr_risk_thr, self.corr_risk_cut):
             if c >= thr:
@@ -364,6 +378,31 @@ class DynamicStrategy:
             m_g = min(m_g, fb_cut)
         return m_g, m_all
 
+    def _confirm_score(self, dt, sc):
+        """向上调仓需连续N个周三确认, 向下立即生效(防假突破/降换手)"""
+        raw = self.sig.score(dt)
+        if self._last_confirmed is None:
+            self._last_confirmed = sc
+            return sc
+        if sc <= self._last_confirmed:
+            self._last_confirmed = min(self._last_confirmed, sc)
+            return sc
+        idx = self.R.index
+        i = idx.get_indexer([dt], method="ffill")[0]
+        ws = []
+        j = i
+        while len(ws) < self.score_confirm and j >= 0:
+            if idx[j].weekday() == 2:
+                ws.append(self.sig.score(idx[j]))
+            j -= 1
+        L = sc
+        while L > self._last_confirmed:
+            if all(r >= L for r in ws):
+                self._last_confirmed = L
+                return L
+            L -= 1
+        return self._last_confirmed
+
     def _base_target(self, dt, sc):
         g, d = self.state_map.get(sc, self.state_map[min(max(sc, 0), 9)])
         split_g = self.growth_split_bull if g >= 30 else self.growth_split_bear
@@ -399,12 +438,19 @@ class DynamicStrategy:
             out["159941"] = FLOOR["159941"] + us_total * us_split["159941"]
             out["513500"] = FLOOR["513500"] + us_total * us_split["513500"]
         else:
+            prem_freed = 0.0
+            if self.premium_rotate and prem_cut < 1.0:
+                prem_freed = (1.0 - prem_cut) * (out["159941"] - FLOOR["159941"] + out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * corr_cut
             out["159941"] = FLOOR["159941"] + (out["159941"] - FLOOR["159941"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
             out["513500"] = FLOOR["513500"] + (out["513500"] - FLOOR["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
+            if prem_freed > 0:
+                out["159952"] = FLOOR["159952"] + (out["159952"] - FLOOR["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut + prem_freed * m_cn_g * m_cn_all
         return out
 
     def regular_target(self, dt, ctx):
         sc = self._eff_score(dt)
+        if self.score_confirm > 0:
+            sc = self._confirm_score(dt, sc)
         self.state_log.append((dt, sc))
         out = self._base_target(dt, sc)
         pf = ctx.get("pf_rets", pd.Series(dtype=float))
@@ -417,8 +463,8 @@ class DynamicStrategy:
                       if len(neg) > 20 else pf.ewm(halflife=20).std().iloc[-1] * np.sqrt(252))
             else:
                 ew = pf.ewm(halflife=20).std().iloc[-1] * np.sqrt(252)
-            if ew > 0 and ew > vt_eff * 1.15:
-                scale = min(scale, (vt_eff * 1.15) / ew)
+            if ew > 0 and ew > vt_eff * self.vol_buf:
+                scale = min(scale, (vt_eff * self.vol_buf) / ew)
             wv = (1 + pf).cumprod()
             dd = wv.iloc[-1] / wv.cummax().iloc[-1] - 1.0 if wv.cummax().iloc[-1] > 0 else 0.0
             cap = 1.0

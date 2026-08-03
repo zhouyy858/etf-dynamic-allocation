@@ -13,8 +13,11 @@ SLOTS = ["159232", "515100", "159941", "513500", "159952"]
 
 def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weights=None,
                  start=None, end=None, tranches=TRANCHES, fee=FEE, repo=REPO,
-                 min_delta=0.002, name="", tranche_weights=None):
-    """tranche_weights: 分笔比例列表(如[1.0]立即执行、[0.5,0.5]、[1/3]*3), 默认None=等分tranches笔"""
+                 min_delta=0.002, name="", tranche_weights=None,
+                 cash_bond_rets=None, cash_bond_pct=0.0):
+    """tranche_weights: 分笔比例列表(如[1.0]立即执行、[0.5,0.5]、[1/3]*3), 默认None=等分tranches笔
+    cash_bond_pct: 闲置现金中配置债券ETF的比例(0~1); cash_bond_rets: 债券ETF日收益序列(如511010),
+    缺失日按逆回购repo计息 -> 现金层 = (1-pct)*逆回购 + pct*债券ETF"""
     if tranche_weights is None:
         tw = np.array([1.0 / tranches] * tranches)
     else:
@@ -34,6 +37,9 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
     n = len(dates)
     k = len(SLOTS)
     repo_d = (1 + repo) ** (1 / TRADING_DAYS) - 1
+    bond = None
+    if cash_bond_rets is not None and cash_bond_pct > 0:
+        bond = cash_bond_rets.reindex(dates).ffill().fillna(repo_d)
 
     def fixed_target():
         t = np.array([fixed_weights[s] for s in SLOTS], dtype=float)
@@ -110,7 +116,11 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
         r = R.iloc[i].values
         fee_today = turnover_day[i] * fee
         g = w * (1.0 + r)          # 权益增长
-        c = cash * (1.0 + repo_d)  # 现金增长
+        if bond is not None:
+            cash_ret = (1.0 - cash_bond_pct) * repo_d + cash_bond_pct * float(bond.iloc[i])
+        else:
+            cash_ret = repo_d
+        c = cash * (1.0 + cash_ret)  # 现金增长(逆回购+债券ETF混合)
         pf_ret = float(g.sum() + c - 1.0 - fee_today)
         factor = 1.0 + pf_ret
         w = g / factor

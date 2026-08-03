@@ -4,7 +4,7 @@
 import sys, os, json
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from data_prep import build_panel
+from data_prep import build_panel, read_table, rets_from
 from engine import run_backtest, evaluate, fmt_eval, SLOTS
 from strategy import DynamicStrategy
 from metrics import drawdown_series
@@ -59,10 +59,14 @@ def run_all(R, label, start, end, dyn_cfg):
     results["B7等权买持"] = evaluate(res, periods=PERIODS)
     wealths["B7等权买持"] = res["wealth"]
     ds = DynamicStrategy(R, cfg=dyn_cfg)
+    bond = None
+    if dyn_cfg.get("cash_bond_pct"):
+        bond = rets_from(read_table("511010_nav.csv"), "cum_nav")
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(),
                        start=start, end=end, name=f"DYN {label}",
                        min_delta=dyn_cfg.get("min_delta", 0.02), repo=dyn_cfg.get("repo_rate", 0.022),
-                       tranche_weights=dyn_cfg.get("tranche_weights"))
+                       tranche_weights=dyn_cfg.get("tranche_weights"),
+                       cash_bond_rets=bond, cash_bond_pct=dyn_cfg.get("cash_bond_pct", 0.0))
     results[f"DYN {label}"] = evaluate(res, periods=PERIODS)
     wealths[f"DYN {label}"] = res["wealth"]
     results["_weights"] = res["weights"]

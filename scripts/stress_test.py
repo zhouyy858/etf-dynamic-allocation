@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """压力测试: 三情景(牛市/震荡/熊市) + 新增跨境共振熊市(合成冲击)
-对比 DYN v10(旧) vs DYN v15(3周三笔) vs DYN v17(1笔) vs DYN v18(1笔+底仓5+5)
+对比 v10/v15/v17/v18/v20(现金层国债增强)
 每周三决策、DYN v17 当日一笔成交(原分3周三笔各1/3已被替代)
 合成共振: 取真实双牛窗口2024-09~2026-07, 人为将美股收益缩放到窗口累计-30%、
 A股缩放到-20%、沪深300缩放到-25%(信号一致), 检验极端共振下的防守
@@ -8,7 +8,7 @@ A股缩放到-20%、沪深300缩放到-25%(信号一致), 检验极端共振下�
 import sys, os, json
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from data_prep import build_panel
+from data_prep import build_panel, read_table, rets_from
 from engine import run_backtest, evaluate, SLOTS
 from strategy import DynamicStrategy
 
@@ -19,6 +19,7 @@ CFG10 = json.load(open(f"{SKILL_REF}/final_cfg_v10.json"))
 CFG14 = json.load(open(f"{SKILL_REF}/final_cfg_v15.json"))
 CFG17 = json.load(open(f"{SKILL_REF}/final_cfg_v17.json"))
 CFG18 = json.load(open(f"{SKILL_REF}/final_cfg_v18.json"))
+CFG20 = json.load(open(f"{SKILL_REF}/final_cfg_v20.json"))
 REPO = 0.022
 
 BENCHMARKS = {
@@ -67,8 +68,12 @@ def synthetic_resonance(R, window, us_target, cn_target, idx_target):
 
 def run_scenario(name, ps, pe, R, a_mkt=None, dyn_cfg=None, min_delta=0.002, label="DYN", repo=0.018, tweights=None):
     ds = DynamicStrategy(R, cfg=dyn_cfg, a_mkt_override=a_mkt)
+    bond = None
+    if dyn_cfg and dyn_cfg.get("cash_bond_pct"):
+        bond = rets_from(read_table("511010_nav.csv"), "cum_nav")
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(),
-                       start=ps, end=pe, name=label, min_delta=min_delta, repo=repo, tranche_weights=tweights)
+                       start=ps, end=pe, name=label, min_delta=min_delta, repo=repo, tranche_weights=tweights,
+                       cash_bond_rets=bond, cash_bond_pct=dyn_cfg.get("cash_bond_pct", 0.0) if dyn_cfg else 0.0)
     rows = {label: evaluate(res)}
     for bname, bw in BENCHMARKS.items():
         rb = run_backtest(R, fixed_weights=bw, start=ps, end=pe, name=bname, min_delta=0.0002)
@@ -97,6 +102,7 @@ def main():
         r14 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG14, min_delta=0.02, label="DYN v15", repo=REPO)
         r17 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG17, min_delta=0.02, label="DYN v17", repo=REPO, tweights=CFG17.get("tranche_weights"))
         r18 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG18, min_delta=0.02, label="DYN v18", repo=REPO, tweights=CFG18.get("tranche_weights"))
+        r20 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG20, min_delta=0.02, label="DYN v20", repo=REPO, tweights=CFG20.get("tranche_weights"))
         merged = {}
         for k, e in r10.items():
             merged[k] = e
@@ -106,8 +112,10 @@ def main():
             merged[k] = e  # 覆盖同名基准行(值相同), 新增 DYN v17 主行
         for k, e in r18.items():
             merged[k] = e  # 新增 DYN v18 主行
+        for k, e in r20.items():
+            merged[k] = e  # 新增 DYN v20 主行
         results[name] = merged
-        for k in ["DYN v10", "DYN v15", "DYN v17", "DYN v18"] + list(BENCHMARKS.keys()):
+        for k in ["DYN v10", "DYN v15", "DYN v17", "DYN v18", "DYN v20"] + list(BENCHMARKS.keys()):
             if k in merged:
                 e = merged[k]
                 print(f"  {k:<18} CAGR={e['cagr']*100:7.2f}%  MDD={e['max_dd']*100:6.2f}%  "

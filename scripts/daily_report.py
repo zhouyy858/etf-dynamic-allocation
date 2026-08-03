@@ -5,7 +5,7 @@
 import sys, os, json
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from data_prep import build_panel
+from data_prep import build_panel, read_table, rets_from
 from data_prep import DATA_DIR
 from engine import run_backtest
 from strategy import DynamicStrategy
@@ -37,8 +37,10 @@ def main():
     cfg = json.load(open(CFG_FILE))
     R, W = build_panel("proxy")
     ds = DynamicStrategy(R, cfg=cfg)
-    res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23", min_delta=0.02, repo=0.022,
-                       tranche_weights=cfg.get("tranche_weights"))
+    bond = rets_from(read_table("511010_nav.csv"), "cum_nav") if cfg.get("cash_bond_pct") else None
+    res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23", min_delta=0.02, repo=cfg.get("repo_rate", 0.022),
+                       tranche_weights=cfg.get("tranche_weights"),
+                       cash_bond_rets=bond, cash_bond_pct=cfg.get("cash_bond_pct", 0.0))
     wdf, rets = res["weights"], res["rets"]
     wealth = (1 + rets).cumprod()
     last = wdf.index[-1]

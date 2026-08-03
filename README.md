@@ -33,6 +33,7 @@ SKILL.md                  # 技能入口：触发说明、7步闭环工作流、
 agents/openai.yaml        # UI 元数据
 scripts/                  # 可复现回测框架（engine/strategy/metrics/data_prep/
                           # run_backtest/stress_test/search + 数据刷新脚本）
+                          # 每日自动化: daily_fetch/daily_report/daily_automation
 references/               # 投资手册 v10、定稿参数 final_cfg_v10.json、
                           # 迭代进展、压力测试、风险分析
 assets/data/              # 2014 起代理 + 2025 起真实 ETF 数据面板
@@ -49,9 +50,11 @@ python3 scripts/run_backtest.py          # 完整回测：DYN vs B1-B7 基准 + 
 python3 scripts/run_backtest.py <cfg.json> <tag>   # 自定义参数
 python3 scripts/stress_test.py           # 三情景压力测试（牛/震荡/熊）
 python3 scripts/search.py 120 23         # 参数再优化（真实窗口 CAGR>=20% 且 MDD>=-10%）
+python3 scripts/daily_automation.py      # 每个交易日09:00由launchd触发: 拉数→日报→通知
 ```
 
 输出写入当前目录 `out/`；图表为终端 ASCII（不生成图片文件）。
+每日日报（信号/仓位/目标/调仓动作/组合表现）保存到 `~/ETF策略日报/reports/`，并通过 macOS 通知提醒；可选 Server酱(微信)/Bark(iOS) 推送见 `SKILL.md`。
 
 ## 免责声明
 

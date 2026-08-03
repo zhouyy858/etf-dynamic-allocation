@@ -47,6 +47,14 @@ $PY /path/to/skill/scripts/search.py 120 23
 - `run_backtest.py` 输出：DYN+基准指标表、分阶段表、**当前仓位现状**（实际 vs 目标权重、信号打分、CN/US 市场回撤与锁定状态）、终端 ASCII 净值/回撤/迭代进展图。
 - 刷新数据：`fetch_data.py`（ETF 净值，东方财富）、`fetch_tencent.py`（指数，腾讯）、`fetch_ext.py`（中证指数/QDII 联接）→ 覆盖 `assets/data/` 后重跑回测。
 
+## 每日自动化（每个交易日 09:00）
+
+- 入口：`scripts/daily_automation.py`（由 launchd `com.zhouyy858.etf-daily-report` 周一至五 09:00 触发）。
+- 流程：`scripts/daily_fetch.py` 增量拉取最近约20个交易日数据 → 重建面板 → `scripts/daily_report.py` 生成日报 → macOS 通知（可选微信/iOS 推送）。
+- 环境变量：`ETF_DATA_DIR` 数据目录（默认 `assets/data`）；`ETF_REPORT_DIR` 报告目录（默认 `~/ETF策略日报`，含 `data/`、`reports/`、`logs/`）。
+- 交易日判定：以 ETF 净值最后日期是否更新为准，节假日/无新数据自动跳过、不发送。
+- 可选推送：在 `~/.config/etf_skill/notify.json` 写 `{"serverchan_key":"...","bark_url":"https://api.day.app/xxx"}`。
+
 ## 策略核心（简述，细节看手册）
 
 - **打分**：沪深300 与创业板指各「收盘>120/60/20日均线」×3 + 纳指与标普「>120日均线」×2 + 纳指「>60日均线」×1 = 0-9 分；向上平滑 0.58、向下 0.18。

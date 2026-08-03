@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""补充长历史代理数据: 中证指数(csindex) + 腾讯指数 + QDII联接基金净值"""
+"""补充长历史代理数据: 中证指数(csindex) + 腾讯指数 + QDII联接基金净值(仅作回测历史数据代理, 实盘不交易场外)"""
 import requests, json, time, pandas as pd
 
 H = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",

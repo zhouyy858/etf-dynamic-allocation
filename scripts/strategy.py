@@ -59,12 +59,27 @@ class SignalSet:
         self.u_g = lvl["159941"].reindex(R.index).ffill()
         self.u_m = lvl["513500"].reindex(R.index).ffill()
         self.R = R
+        self.rsrs = self._rsrs_panel(lvl, win=18)
         self.lag = int(lag)  # 信号时点: 0=当日收盘, 1=前一日收盘(严格无未来, 实盘T日尾盘用T-1信号)
         self.gate_win = int(gate_win)
         self.sma = {}
         _win = sorted(set((20, 60, 120, self.gate_win)))
         for nm, x in [("a_mkt", self.a_mkt), ("a_g", self.a_g), ("u_g", self.u_g), ("u_m", self.u_m)]:
             self.sma[nm] = {w: x.rolling(w, min_periods=10).mean() for w in _win}
+
+    def _rsrs_panel(self, lvl, win=18):
+        """RSRS(close-only版, 94fsckbzfd V8.7口径): 18日 价格-时间 滚动相关系数 r, r^3/std_x
+        阈值0.05 ~ r≈0.64(18日强趋势); 与high/low无关, 纯close序列可算"""
+        std_x = float(np.std(np.arange(win)))
+        out = {}
+        for s, l in lvl.items():
+            l = l.dropna()
+            x = pd.Series(np.arange(len(l)), index=l.index)
+            c = l.rolling(win).corr(x)
+            v = (c ** 3) / std_x
+            v = v.where(np.isfinite(v), 0.0).reindex(self.R.index).ffill().fillna(0.0)
+            out[s] = v
+        return out
 
     def _idx(self, dt):
         # 结构防线(不可配置): 信号最小滞后1个交易日 —— 决策日当天收盘数据在盘中不可得,
@@ -147,6 +162,13 @@ class DynamicStrategy:
         self.score_confirm = int(cfg.get("score_confirm_weeks", 0))
         self.confirm_weekday = int(cfg.get("confirm_weekday", 2))  # 确认采样日默认周三(A/B: 周三优于周五, 与调仓日解耦)
         self._last_confirmed = None
+        self.rsrs_gate = bool(cfg.get("rsrs_gate", False))
+        self.rsrs_thr = float(cfg.get("rsrs_thr", 0.05))
+        self.rsrs_cut = float(cfg.get("rsrs_cut", 0.5))
+        self.rsrs_gate_all = bool(cfg.get("rsrs_gate_all", False))
+        self.rsrs_defense = bool(cfg.get("rsrs_defense", False))
+        self.rsrs_defense_t = float(cfg.get("rsrs_defense_t", 4.0))
+        self.rsrs_defense_mix = float(cfg.get("rsrs_defense_mix", 0.5))
         self.hh_stop = bool(cfg.get("hh_stop", False))
         self.hh_win = int(cfg.get("hh_win", 20))
         self.hh_thr = float(cfg.get("hh_thr", 0.08))
@@ -332,6 +354,21 @@ class DynamicStrategy:
                 return 0.3 * vals[63] + 0.3 * vals[126] + 0.4 * vals[252]
             k232 = max(1.0 + mm("159232"), 0.01) ** self.defense_momentum_t
             k100 = max(1.0 + mm("515100"), 0.01) ** self.defense_momentum_t
+            w232 = k232 / (k232 + k100)
+        elif self.rsrs_defense:
+            rs232 = float(self.sig.rsrs["159232"].iloc[i])
+            rs100 = float(self.sig.rsrs["515100"].iloc[i])
+            if self.rsrs_defense_mix >= 1.0:
+                k232 = max(rs232, 1e-4) ** self.rsrs_defense_t
+                k100 = max(rs100, 1e-4) ** self.rsrs_defense_t
+            else:
+                seg = self.R.iloc[max(0, i - self.defense_momentum_win + 1): i + 1]
+                g232 = float((1 + seg["159232"].fillna(0.0)).prod())
+                g100 = float((1 + seg["515100"].fillna(0.0)).prod())
+                mom232 = g232 ** self.defense_momentum_t
+                mom100 = g100 ** self.defense_momentum_t
+                k232 = (1 - self.rsrs_defense_mix) * mom232 + self.rsrs_defense_mix * max(rs232, 1e-4) ** self.rsrs_defense_t
+                k100 = (1 - self.rsrs_defense_mix) * mom100 + self.rsrs_defense_mix * max(rs100, 1e-4) ** self.rsrs_defense_t
             w232 = k232 / (k232 + k100)
         else:
             seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
@@ -562,6 +599,12 @@ class DynamicStrategy:
                     dd = float(lvl.iloc[-1] / lvl.max() - 1.0)
                     if dd < -self.hh_thr:
                         out[s] = self.floor[s] + (out[s] - self.floor[s]) * self.hh_cut
+        if self.rsrs_gate:
+            i = self.sig._idx(dt)
+            targets = ("159232", "515100", "159952", "159941", "513500") if self.rsrs_gate_all else ("159952", "159941", "513500")
+            for s in targets:
+                if float(self.sig.rsrs[s].iloc[i]) < self.rsrs_thr:
+                    out[s] = self.floor[s] + (out[s] - self.floor[s]) * self.rsrs_cut
         return out
 
     def regular_target(self, dt, ctx):

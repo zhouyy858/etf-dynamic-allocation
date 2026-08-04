@@ -83,6 +83,7 @@
 
 ## 迭代历史（简）
 
+- **v27 探索（2026-08-04，证伪，未定稿）**：剔除 159232 自由现金流（proxy Cal 1.64→1.23、MDD -6.87→-8.81，更差）；加入券商ETF（512880/399975）替换 159232/515100/159952 三槽位全部不如基线（券商 2014 以来 CAGR 仅 1.15%、MDD -72%、与 A 股高相关）——**保留 159232、不加入券商**。探索记录：`out/exp_v27_broker.json`。
 - **v26（2026-08-04）**：v25 + 溢价门控削减增强（`premium_cut 0.6/0.3/0.15 → 0.45/0.22/0.08`）；proxy Cal 1.62→1.64、real Cal 6.60→**7.49**（CAGR 29.99%、MDD -4.01% 历版最低）、WFO OOS 1.34→**1.41**、共振熊 -8.91%→**-7.64%** 全维度改善；premium_cut 0.55→0.40 单调平台、0.45 饱和；同批 9 轴微扫 46+17 组全悬崖/尖峰证伪（gate_win 110 单点峰、CN 快刹车 0.06 尖峰等），v25 其余参数不动。探索记录：`out/exp_v26_micro.json`、`out/exp_v26_combo.json`、`out/exp_v26_cnfb.json`、`out/exp_v26_misc.json`、`out/exp_v26_premcut.json`、`out/exp_v26_validate.json`、`out/exp_v26_resonance.json`、`out/audit_v26.json`；另修复 `data_prep.py` W 财富指数首行 NaN 归一化 bug（不影响回测收益口径，仅影响财富面板显示）。
 - **v25（2026-08-04）**：v24 + QDII 相对溢价倾斜（美股桶内高溢价→低溢价）；proxy Cal 1.60→1.61、real Cal 6.42→6.60、WFO 1.70/1.34、共振熊 -9.15%→-8.91% 全维度改善；36 组参数扫描取平台中部；511380 国开债现金层证伪（MDD -12.45%）。探索记录：`out/exp_v24b_premium_tilt.json`、`out/exp_v24b_tilt_scan.json`、`out/exp_v24_aggressive.json`（f=1.1 激进档：real +1.3pp 但 Calmar 1.60→1.30、共振熊 -9.89%，仅存档不推荐，`references/final_cfg_v24_aggressive.json`）。
 - **v24（2026-08-04）**：v23 + 现金层 511010 比例 50%→75%（现金层 = 25% 逆回购 + 75% 国债ETF）；proxy Calmar 1.57→1.60、WFO 训练 1.59→1.66 / OOS 1.32→1.33、压力全情景 ≤-9.15%；确认周期 A/B 验证周三锚定；f 轴外推证伪（f≥1.1 贴线/破线）。探索记录：`out/exp_v24_cash.json`、`out/exp_frontier*.json`、`out/exp_confirm_fix.json`。

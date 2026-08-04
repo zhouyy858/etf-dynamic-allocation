@@ -345,5 +345,26 @@
   "原因": "7个行业ETF全为高贝塔: Vol 21-34%, MDD -35%~-69%, 与A股资产corr 0.5-0.85, 与海外仅0.08-0.14; 替换防御槽加深回撤(proxy MDD普遍-7.4~-8.9%), 替换成长槽大幅降收益(创业板beta无替代), 与v27券商结论一致",
   "结论": "全部证伪, 保留159232/515100/159952原配置, v26定稿不变",
   "数据": "assets/data/index_399986/399987/399989/930997/000913/000819/399967.csv(csindex) + 512800/512690/512170/515030/512010/512400/512660_price.csv(腾讯场内价)"
+ },
+ "v29_GitHub方案吸收探索_证伪": {
+  "调研": "GitHub候选: 1)zhangsensen/etf-rotation-strategy(67★,生产级,ADX14D+BREAKOUT20D+PRICE_POSITION120D+融资/份额因子+regime gate+hysteresis,2020-01~2026-02公开口径+105.5%/MDD10.8%/Sharpe1.46); 2)Trainspotting31/etf-signal-system(五因子: MA120保护伞+Dual Momentum+海龟唐奇安+ATR止损+波动率门控); 3)CDOGss/momentum-multi-actifs(Antonacci双动量: 3/6/12月加权得分+绝对动量过滤+月度TOP3); 4)garroshub/Quant_Sector_Rotation_Strategy(MA Energy+VIX仓位)",
+  "单测": {
+   "A_基线v26": "proxy 11.24%/-6.87%/Cal1.64 | real 29.99%/-4.01%/Cal7.49",
+   "B_multi_mom_Antonacci3_6_12": "proxy 11.22%/-7.00%/Cal1.60(无改善) | real 29.99%/-4.01%/Cal7.49(持平) -> 证伪",
+   "C_growth_rotation": "proxy 11.00%/-11.93%/Cal0.92 | real 27.96%/-7.25%/Cal3.86(MDD大幅恶化) -> 证伪",
+   "D_vol_scale_1.15_0.85": "与基线完全一致(组合波动率约束从未触发) -> 无效",
+   "E_B+C组合": "同C, 证伪",
+   "F_hh_stop_高点8%x0.5": "proxy Cal1.39 | real Cal7.18 -> 证伪",
+   "G_hh_stop_6%": "proxy 10.63%/-8.85%/Cal1.20 -> 证伪",
+   "H_hh_stop_10%": "proxy Cal1.65(+0.01)但real Cal7.43(-0.06), 双窗口不同向且噪声内 -> 证伪"
+  },
+  "同窗口对比_2020-01_2026-02": {
+   "v26": "总收益+92.4% | CAGR 11.68% | MDD -7.79% | Sharpe 1.23 | Calmar 1.50",
+   "zhangsensen_v8.0公开": "总收益+105.5% | MDD 10.8% | Sharpe 1.46",
+   "沪深300基准": "CAGR 2.16% | MDD -45.60%",
+   "差距归因": "zhangsensen高收益依赖49只宽标的池+5日高频换仓+融资买入比/份额变化另类因子(本组合无数据源); 我们约束=5只固定标的(用户指定)+每周三周三笔+低回撤体验优先; 收益差13pp但回撤我们浅3pp"
+  },
+  "结论": "外部方案6个增量机制(am_gate/regime_gate已于v23证伪; multi_mom/growth_rotation/vol_scale/hh_stop于本轮证伪)全部不可吸收; v26已吸收外部方案中适用的部分(动量桶/快刹车/深熊锁/回撤上限/溢价门控/确认机制/min_delta迟滞); 5标的+现有机制的优化边界已达",
+  "代码": "strategy.py新增defense_momentum_multi/hh_stop两开关(默认False, 不影响v26行为)"
  }
 }

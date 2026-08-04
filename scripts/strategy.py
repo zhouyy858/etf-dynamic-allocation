@@ -120,6 +120,7 @@ class DynamicStrategy:
         self.growth_split_bull = dict(cfg.get("growth_split_bull", GROWTH_SPLIT_BULL))
         self.growth_split_bear = dict(cfg.get("growth_split_bear", GROWTH_SPLIT_BEAR))
         self.defense_momentum = bool(cfg.get("defense_momentum", False))
+        self.defense_momentum_multi = bool(cfg.get("defense_momentum_multi", False))
         self.defense_momentum_win = int(cfg.get("defense_momentum_win", DEFENSE_MOMENTUM_WIN))
         self.defense_momentum_t = float(cfg.get("defense_momentum_t", DEFENSE_MOMENTUM_T))
         self.defense_clamp = tuple(cfg.get("defense_clamp", DEFENSE_CLAMP))
@@ -146,6 +147,10 @@ class DynamicStrategy:
         self.score_confirm = int(cfg.get("score_confirm_weeks", 0))
         self.confirm_weekday = int(cfg.get("confirm_weekday", 2))  # 确认采样日默认周三(A/B: 周三优于周五, 与调仓日解耦)
         self._last_confirmed = None
+        self.hh_stop = bool(cfg.get("hh_stop", False))
+        self.hh_win = int(cfg.get("hh_win", 20))
+        self.hh_thr = float(cfg.get("hh_thr", 0.08))
+        self.hh_cut = float(cfg.get("hh_cut", 0.5))
         self.speed_brake = bool(cfg.get("speed_brake", False))
         self.speed_brake_win = int(cfg.get("speed_brake_win", 5))
         self.speed_brake_thr = float(cfg.get("speed_brake_thr", -0.04))
@@ -311,18 +316,30 @@ class DynamicStrategy:
         return max(self.recovery_ramp_min, min(1.0, rec / 0.5))
 
     def _defense_split(self, dt):
-        """国内防御双持轮动: 159232(自由现金流) vs 515100(红利低波100) 按相对动量分配防御弹性"""
+        """国内防御双持轮动: 159232(自由现金流) vs 515100(红利低波100) 按相对动量分配防御弹性
+        multi模式(Antonacci): 3/6/12月(63/126/252日)加权动量 0.3/0.3/0.4, 文献标准多窗口"""
         if not self.defense_momentum:
             return dict(self.defense_split_base)
         i = self.sig._idx(dt)
         if i < self.defense_momentum_win or i >= len(self.R):
             return dict(DEFENSE_SPLIT)
-        seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
-        g232 = float((1 + seg["159232"].fillna(0.0)).prod())
-        g100 = float((1 + seg["515100"].fillna(0.0)).prod())
-        if g232 <= 0 or g100 <= 0:
-            return dict(DEFENSE_SPLIT)
-        w232 = g232 ** self.defense_momentum_t / (g232 ** self.defense_momentum_t + g100 ** self.defense_momentum_t)
+        if self.defense_momentum_multi:
+            def mm(s):
+                vals = {}
+                for win in (63, 126, 252):
+                    seg2 = self.R.iloc[max(0, i - win + 1): i + 1]
+                    vals[win] = float((1 + seg2[s].fillna(0.0)).prod()) - 1.0
+                return 0.3 * vals[63] + 0.3 * vals[126] + 0.4 * vals[252]
+            k232 = max(1.0 + mm("159232"), 0.01) ** self.defense_momentum_t
+            k100 = max(1.0 + mm("515100"), 0.01) ** self.defense_momentum_t
+            w232 = k232 / (k232 + k100)
+        else:
+            seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
+            g232 = float((1 + seg["159232"].fillna(0.0)).prod())
+            g100 = float((1 + seg["515100"].fillna(0.0)).prod())
+            if g232 <= 0 or g100 <= 0:
+                return dict(DEFENSE_SPLIT)
+            w232 = g232 ** self.defense_momentum_t / (g232 ** self.defense_momentum_t + g100 ** self.defense_momentum_t)
         lo, hi = self.defense_clamp
         w232 = min(max(float(w232), lo), hi)
         return {"159232": w232, "515100": 1.0 - w232}
@@ -536,6 +553,15 @@ class DynamicStrategy:
                     g = float((1 + seg[s].fillna(0.0)).prod()) - 1.0
                     if g < 0:
                         out[s] = self.floor[s] + (out[s] - self.floor[s]) * self.am_cut
+        if self.hh_stop:
+            i = self.sig._idx(dt)
+            if i >= self.hh_win:
+                for s in ("159952", "159941", "513500"):
+                    seg2 = self.R.iloc[i - self.hh_win + 1: i + 1]
+                    lvl = (1 + seg2[s].fillna(0.0)).cumprod()
+                    dd = float(lvl.iloc[-1] / lvl.max() - 1.0)
+                    if dd < -self.hh_thr:
+                        out[s] = self.floor[s] + (out[s] - self.floor[s]) * self.hh_cut
         return out
 
     def regular_target(self, dt, ctx):

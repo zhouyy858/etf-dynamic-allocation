@@ -234,12 +234,16 @@ def main():
     navr = {"DYN": rr["_wealths"]["DYN " + tag], "B3均衡": rr["_wealths"]["B3均衡"]}
     term_line_chart(navr, "收益图: 真实ETF窗口 (2025-04-23起, 对数坐标)", log=True)
     its2 = json.load(open(itfile))
-    tags_ok = [t for t in ["v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", tag] if t in its2]
-    rows_c = [(t, its2[t]["proxy_cagr"] * 100, f"{its2[t]['proxy_cagr']*100:.2f}%") for t in tags_ok]
-    term_bars(rows_c, "迭代优化进展: 全历史年化收益 (v2→%s)" % tag)
-    rows_cr = [(t, its2[t]["real_cagr"] * 100, f"{its2[t]['real_cagr']*100:.2f}%") for t in tags_ok if "real_cagr" in its2[t]]
-    term_bars(rows_cr, "迭代优化进展: 真实窗口年化收益 (v2→%s)" % tag)
-    rows_m = [(t, its2[t]["proxy_mdd"] * 100, f"{its2[t]['proxy_mdd']*100:.2f}%") for t in tags_ok]
+    canon = [("v10", "v10"), ("v15", "v15check2"), ("v17", "v17final"), ("v21", "v21"), ("v22", "v22"), ("v23", "v23")]
+    tags_ok = [lab for lab, k in canon if k in its2]
+    def val(lab):
+        k = dict(canon)[lab]
+        return its2[k]
+    rows_c = [(t, val(t)["proxy_cagr"] * 100, f"{val(t)['proxy_cagr']*100:.2f}%") for t in tags_ok]
+    term_bars(rows_c, "迭代优化进展: 全历史年化收益 (v10→%s)" % tag)
+    rows_cr = [(t, val(t)["real_cagr"] * 100, f"{val(t)['real_cagr']*100:.2f}%") for t in tags_ok if "real_cagr" in val(t)]
+    term_bars(rows_cr, "迭代优化进展: 真实窗口年化收益 (v10→%s)" % tag)
+    rows_m = [(t, val(t)["proxy_mdd"] * 100, f"{val(t)['proxy_mdd']*100:.2f}%") for t in tags_ok]
     term_bars(rows_m, "迭代优化进展: 全历史最大回撤 (越短越好)")
     print("\n[ok] 已保存: %s/iter_%s_proxy.json, %s/iter_%s_real.json, %s/iterations.json" % (OUT, tag, OUT, tag, OUT))
 

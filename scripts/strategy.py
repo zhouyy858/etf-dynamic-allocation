@@ -60,6 +60,7 @@ class SignalSet:
         self.u_m = lvl["513500"].reindex(R.index).ffill()
         self.R = R
         self.rsrs = self._rsrs_panel(lvl, win=18)
+        self.ind = self._ind_panel(lvl)
         self.lag = int(lag)  # 信号时点: 0=当日收盘, 1=前一日收盘(严格无未来, 实盘T日尾盘用T-1信号)
         self.gate_win = int(gate_win)
         self.sma = {}
@@ -79,6 +80,66 @@ class SignalSet:
             v = (c ** 3) / std_x
             v = v.where(np.isfinite(v), 0.0).reindex(self.R.index).ffill().fillna(0.0)
             out[s] = v
+        return out
+
+    def _ind_panel(self, lvl):
+        """常用技术指标面板(close-only, 无high/low/volume数据; 全部归一化为强度0~1, 越大越强;
+        中性值0.5; 早期样本fillna(0.5)避免误触发). 指标与价格均为滞后序列, 由_idx结构防线保证无未来"""
+        out = {}
+        for s, l in lvl.items():
+            c = l.dropna()
+            d = {}
+            # MACD(12,26,9): DIF-DEA柱状图, 以120日std归一化后tanh映射
+            e12 = c.ewm(span=12, adjust=False).mean()
+            e26 = c.ewm(span=26, adjust=False).mean()
+            dif = e12 - e26
+            dea = dif.ewm(span=9, adjust=False).mean()
+            hist = (dif - dea) * 2.0
+            hsd = hist.rolling(120, min_periods=30).std()
+            d["macd"] = 0.5 + 0.5 * np.tanh(hist / (2.0 * hsd + 1e-12))
+            # RSI(14): 标准Wilder平滑
+            delta = c.diff()
+            ru = delta.clip(lower=0.0).ewm(alpha=1 / 14.0, adjust=False).mean()
+            rd = (-delta).clip(lower=0.0).ewm(alpha=1 / 14.0, adjust=False).mean()
+            rsi = 100.0 - 100.0 / (1.0 + ru / (rd + 1e-12))
+            d["rsi14"] = (rsi / 100.0)
+            # KDJ(9,3,3) close近似: RSV用close的HHV/LLV
+            hhv = c.rolling(9, min_periods=3).max()
+            llv = c.rolling(9, min_periods=3).min()
+            rsv = ((c - llv) / (hhv - llv + 1e-12)).clip(0, 1) * 100.0
+            k = rsv.ewm(alpha=1 / 3.0, adjust=False).mean()
+            d["kdj"] = (k / 100.0)
+            # BOLL %B(20,2)
+            mid = c.rolling(20, min_periods=10).mean()
+            sd = c.rolling(20, min_periods=10).std()
+            d["boll_pctb"] = ((c - mid) / (2.0 * sd + 1e-12)).clip(0, 1)
+            # CCI(14) close近似: TP=C
+            sma14 = c.rolling(14, min_periods=7).mean()
+            md = (c - sma14).abs().rolling(14, min_periods=7).mean()
+            cci = (c - sma14) / (0.015 * md + 1e-12)
+            d["cci14"] = 0.5 + 0.5 * np.tanh(cci / 200.0)
+            # TRIX(12): 三重EMA变化率
+            tr = c.ewm(span=12, adjust=False).mean()
+            tr = tr.ewm(span=12, adjust=False).mean()
+            tr = tr.ewm(span=12, adjust=False).mean()
+            trix = tr.pct_change()
+            d["trix12"] = 0.5 + 0.5 * np.tanh(trix * 100.0 / 2.0)
+            # BIAS(24): 乖离率±10%映射
+            ma24 = c.rolling(24, min_periods=12).mean()
+            bias = (c - ma24) / (ma24 + 1e-12)
+            d["bias24"] = 0.5 + 0.5 * np.tanh(bias / 0.10)
+            # WILLR(14) close近似
+            h14 = c.rolling(14, min_periods=7).max()
+            l14 = c.rolling(14, min_periods=7).min()
+            d["willr14"] = ((h14 - c) / (h14 - l14 + 1e-12)).clip(0, 1)
+            # MOM20: 20日动量(参照系, 与绝对动量门控重叠度检验)
+            d["mom20"] = 0.5 + 0.5 * np.tanh(c.pct_change(20) * 100.0 / 10.0)
+            # ZSCORE60: 60日z-score(与市场刹车/布林带重叠度检验)
+            ma60 = c.rolling(60, min_periods=30).mean()
+            sd60 = c.rolling(60, min_periods=30).std()
+            d["zscore60"] = 0.5 + 0.5 * np.tanh((c - ma60) / (sd60 + 1e-12) / 2.0)
+            df = pd.DataFrame(d).reindex(self.R.index).ffill().fillna(0.5)
+            out[s] = df
         return out
 
     def _idx(self, dt):
@@ -169,6 +230,14 @@ class DynamicStrategy:
         self.rsrs_defense = bool(cfg.get("rsrs_defense", False))
         self.rsrs_defense_t = float(cfg.get("rsrs_defense_t", 4.0))
         self.rsrs_defense_mix = float(cfg.get("rsrs_defense_mix", 0.5))
+        self.ind_gate = bool(cfg.get("ind_gate", False))
+        self.ind_gate_all = bool(cfg.get("ind_gate_all", False))
+        self.ind_name = str(cfg.get("ind_name", "macd"))
+        self.ind_thr = float(cfg.get("ind_thr", 0.5))
+        self.ind_cut = float(cfg.get("ind_cut", 0.5))
+        self.ind_defense = bool(cfg.get("ind_defense", False))
+        self.ind_defense_t = float(cfg.get("ind_defense_t", 4.0))
+        self.ind_defense_mix = float(cfg.get("ind_defense_mix", 0.5))
         self.hh_stop = bool(cfg.get("hh_stop", False))
         self.hh_win = int(cfg.get("hh_win", 20))
         self.hh_thr = float(cfg.get("hh_thr", 0.08))
@@ -369,6 +438,21 @@ class DynamicStrategy:
                 mom100 = g100 ** self.defense_momentum_t
                 k232 = (1 - self.rsrs_defense_mix) * mom232 + self.rsrs_defense_mix * max(rs232, 1e-4) ** self.rsrs_defense_t
                 k100 = (1 - self.rsrs_defense_mix) * mom100 + self.rsrs_defense_mix * max(rs100, 1e-4) ** self.rsrs_defense_t
+            w232 = k232 / (k232 + k100)
+        elif self.ind_defense:
+            ind232 = float(self.sig.ind["159232"][self.ind_name].iloc[i])
+            ind100 = float(self.sig.ind["515100"][self.ind_name].iloc[i])
+            if self.ind_defense_mix >= 1.0:
+                k232 = max(ind232, 1e-4) ** self.ind_defense_t
+                k100 = max(ind100, 1e-4) ** self.ind_defense_t
+            else:
+                seg = self.R.iloc[max(0, i - self.defense_momentum_win + 1): i + 1]
+                g232 = float((1 + seg["159232"].fillna(0.0)).prod())
+                g100 = float((1 + seg["515100"].fillna(0.0)).prod())
+                mom232 = g232 ** self.defense_momentum_t
+                mom100 = g100 ** self.defense_momentum_t
+                k232 = (1 - self.ind_defense_mix) * mom232 + self.ind_defense_mix * max(ind232, 1e-4) ** self.ind_defense_t
+                k100 = (1 - self.ind_defense_mix) * mom100 + self.ind_defense_mix * max(ind100, 1e-4) ** self.ind_defense_t
             w232 = k232 / (k232 + k100)
         else:
             seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
@@ -605,6 +689,12 @@ class DynamicStrategy:
             for s in targets:
                 if float(self.sig.rsrs[s].iloc[i]) < self.rsrs_thr:
                     out[s] = self.floor[s] + (out[s] - self.floor[s]) * self.rsrs_cut
+        if self.ind_gate:
+            i = self.sig._idx(dt)
+            targets = ("159232", "515100", "159952", "159941", "513500") if self.ind_gate_all else ("159952", "159941", "513500")
+            for s in targets:
+                if float(self.sig.ind[s][self.ind_name].iloc[i]) < self.ind_thr:
+                    out[s] = self.floor[s] + (out[s] - self.floor[s]) * self.ind_cut
         return out
 
     def regular_target(self, dt, ctx):

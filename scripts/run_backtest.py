@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""最终运行器(ETF动态配置skill v24): 每周五用前一日信号决策、目标缺口1笔当日收盘成交(v22 S阶段45组网格实证)
+"""最终运行器(ETF动态配置skill v25): 每周五用前一日信号决策、目标缺口1笔当日收盘成交(v22 S阶段45组网格实证)
 输出: 全历史/真实窗口指标、基准对比、分阶段、仓位现状、终端ASCII图表(不生成图片文件)"""
 import sys, os, json
 import numpy as np, pandas as pd
@@ -168,10 +168,10 @@ def term_bars(rows, title, width=42):
 # ---------- 主流程 ----------
 def main():
     _here = os.path.dirname(os.path.abspath(__file__))
-    _p1 = os.path.join(_here, "..", "references", "final_cfg_v24.json")
-    _p2 = os.path.join(_here, "references", "final_cfg_v24.json")
+    _p1 = os.path.join(_here, "..", "references", "final_cfg_v25.json")
+    _p2 = os.path.join(_here, "references", "final_cfg_v25.json")
     cfg_file = sys.argv[1] if len(sys.argv) > 1 else (_p1 if os.path.exists(_p1) else _p2)
-    tag = sys.argv[2] if len(sys.argv) > 2 else "v24"
+    tag = sys.argv[2] if len(sys.argv) > 2 else "v25"
     cfg = json.load(open(cfg_file))
     wd = cfg.get("rebal_weekday", 2); wd_cn = "一二三四五"[wd]
     freq = cfg.get("rebal_freq", "weekly"); n_tw = len(cfg.get("tranche_weights", [1.0]))
@@ -237,7 +237,7 @@ def main():
     navr = {"DYN": rr["_wealths"]["DYN " + tag], "B3均衡": rr["_wealths"]["B3均衡"]}
     term_line_chart(navr, "收益图: 真实ETF窗口 (2025-04-23起, 对数坐标)", log=True)
     its2 = json.load(open(itfile))
-    canon = [("v10", "v10"), ("v15", "v15check2"), ("v17", "v17final"), ("v21", "v21"), ("v22", "v22"), ("v23", "v23"), ("v24", "v24")]
+    canon = [("v10", "v10"), ("v15", "v15check2"), ("v17", "v17final"), ("v21", "v21"), ("v22", "v22"), ("v23", "v23"), ("v24", "v24"), ("v25", "v25")]
     tags_ok = [lab for lab, k in canon if k in its2]
     def val(lab):
         k = dict(canon)[lab]

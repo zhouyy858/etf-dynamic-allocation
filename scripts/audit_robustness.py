@@ -101,6 +101,9 @@ PERTURBS = [
     ("growth_split_bear", lambda c, f: mut_growth_split(c, "growth_split_bear", f)),
     ("floor_cn", lambda c, f: mut_floor(c, "cn", f)),
     ("floor_us", lambda c, f: mut_floor(c, "us", f)),
+    ("premium_tilt_thr", lambda c, f: mut_scalar(c, "premium_tilt_thr", f)),
+    ("premium_tilt_cap", lambda c, f: mut_scalar(c, "premium_tilt_cap", f)),
+    ("premium_tilt_max", lambda c, f: mut_scalar(c, "premium_tilt_max", f)),
 ]
 FACTORS = [0.8, 0.9, 1.1, 1.2]
 

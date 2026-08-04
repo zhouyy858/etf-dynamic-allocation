@@ -129,6 +129,10 @@ class DynamicStrategy:
         self.valuation_gate = bool(cfg.get("valuation_gate", False))
         self.premium_gate = bool(cfg.get("premium_gate", False))
         self.premium_rotate = bool(cfg.get("premium_rotate", False))
+        self.premium_tilt = bool(cfg.get("premium_tilt", False))
+        self.premium_tilt_thr = float(cfg.get("premium_tilt_thr", 0.02))
+        self.premium_tilt_cap = float(cfg.get("premium_tilt_cap", 0.05))
+        self.premium_tilt_max = float(cfg.get("premium_tilt_max", 0.5))
         self.corr_risk = bool(cfg.get("corr_risk", False))
         self.corr_conditional = bool(cfg.get("corr_conditional", False))
         self.corr_risk_win = int(cfg.get("corr_risk_win", 60))
@@ -508,6 +512,20 @@ class DynamicStrategy:
             out["513500"] = self.floor["513500"] + (out["513500"] - self.floor["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
             if prem_freed > 0:
                 out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut + prem_freed * m_cn_g * m_cn_all
+        if self.premium_tilt and self._premium is not None and dt in self._premium.index:
+            _pr = self._premium.loc[dt]
+            _p941, _p500 = _pr.get("159941"), _pr.get("513500")
+            if pd.notna(_p941) and pd.notna(_p500):
+                _diff = float(_p941) - float(_p500)
+                _span = max(self.premium_tilt_cap - self.premium_tilt_thr, 1e-9)
+                if _diff > self.premium_tilt_thr:
+                    _frac = min(self.premium_tilt_max, (_diff - self.premium_tilt_thr) / _span)
+                    _sh = (out["159941"] - self.floor["159941"]) * _frac
+                    out["159941"] -= _sh; out["513500"] += _sh
+                elif _diff < -self.premium_tilt_thr:
+                    _frac = min(self.premium_tilt_max, (-_diff - self.premium_tilt_thr) / _span)
+                    _sh = (out["513500"] - self.floor["513500"]) * _frac
+                    out["513500"] -= _sh; out["159941"] += _sh
         for s in self.exclude:
             out[s] = 0.0
         if self.am_gate:

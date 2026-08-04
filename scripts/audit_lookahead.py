@@ -30,6 +30,7 @@ CFG21 = json.load(open(f"{SKILL_REF}/final_cfg_v21.json"))
 CFG22 = json.load(open(f"{SKILL_REF}/final_cfg_v22.json"))
 CFG22B = json.load(open(f"{SKILL_REF}/final_cfg_v22b.json"))
 CFG24 = json.load(open(f"{SKILL_REF}/final_cfg_v24.json"))
+CFG25 = json.load(open(f"{SKILL_REF}/final_cfg_v25.json"))
 bond = rets_from(read_table("511010_nav.csv"), "cum_nav")
 R, _ = build_panel("proxy"); Rr, _ = build_panel("real")
 
@@ -63,6 +64,7 @@ MODES = [
     ("v22 严格(周五weekly1笔)",      CFG22, DynamicStrategy, "pre", 0, [1.0],   True),
     ("v22b 严格(候选定稿)",          CFG22B, DynamicStrategy, "pre", 0, [1.0],   True),
     ("v24 严格(v23+现金债0.75)",      CFG24, DynamicStrategy, "pre", 0, [1.0],   True),
+    ("v25 严格(v24+溢价倾斜)",        CFG25, DynamicStrategy, "pre", 0, [1.0],   True),
 ]
 res = {}
 for name, cfg, cls, am, el, tw, st in MODES:
@@ -87,6 +89,8 @@ b_p = res["v22b 严格(候选定稿)"]["proxy"]["cagr"]
 b_r = res["v22b 严格(候选定稿)"]["real"]["cagr"]
 v24_p = res["v24 严格(v23+现金债0.75)"]["proxy"]["cagr"]
 v24_r = res["v24 严格(v23+现金债0.75)"]["real"]["cagr"]
+v25_p = res["v25 严格(v24+溢价倾斜)"]["proxy"]["cagr"]
+v25_r = res["v25 严格(v24+溢价倾斜)"]["real"]["cagr"]
 assert abs(old_p - 0.1620) < 0.005, f"旧口径proxy复现失败: {old_p:.4f}"
 assert abs(old_r - 0.2810) < 0.01, f"旧口径real复现失败: {old_r:.4f}"
 assert abs(v_p - 0.1023) < 0.005, f"严格proxy回归失败(v21): {v_p:.4f}"
@@ -97,7 +101,9 @@ assert abs(b_p - 0.1056) < 0.01, f"严格proxy回归失败(v22b): {b_p:.4f}"  # 
 assert abs(b_r - 0.2804) < 0.01, f"严格real回归失败(v22b): {b_r:.4f}"
 assert abs(v24_p - 0.1097) < 0.01, f"严格proxy回归失败(v24): {v24_p:.4f}"
 assert abs(v24_r - 0.2836) < 0.01, f"严格real回归失败(v24): {v24_r:.4f}"
-print("\n[ok] 旧口径复现 v20 发布值(16.20%/28.10%) 通过; 严格口径复现 v21/v22/v22b/v24 通过")
+assert abs(v25_p - 0.1109) < 0.01, f"严格proxy回归失败(v25): {v25_p:.4f}"
+assert abs(v25_r - 0.2856) < 0.01, f"严格real回归失败(v25): {v25_r:.4f}"
+print("\n[ok] 旧口径复现 v20 发布值(16.20%/28.10%) 通过; 严格口径复现 v21/v22/v22b/v24/v25 通过")
 
 print("\n===== 压力测试 (严格口径 vs 旧口径) =====")
 synth, s_idx = synthetic_resonance(Rr, ("2024-09-02", "2026-07-31"), -0.30, -0.20, -0.25)

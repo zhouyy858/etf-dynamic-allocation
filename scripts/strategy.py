@@ -140,6 +140,7 @@ class DynamicStrategy:
         self.vol_scale_lo = float(cfg.get("vol_scale_lo", 1.0))
         self.vol_buf = float(cfg.get("vol_buf", 1.15))
         self.score_confirm = int(cfg.get("score_confirm_weeks", 0))
+        self.confirm_weekday = int(cfg.get("confirm_weekday", 2))  # 确认采样日默认周三(A/B: 周三优于周五, 与调仓日解耦)
         self._last_confirmed = None
         self.speed_brake = bool(cfg.get("speed_brake", False))
         self.speed_brake_win = int(cfg.get("speed_brake_win", 5))
@@ -436,7 +437,9 @@ class DynamicStrategy:
         return m_g, m_all
 
     def _confirm_score(self, dt, sc):
-        """向上调仓需连续N个周三确认, 向下立即生效(防假突破/降换手)"""
+        """向上调仓需连续N个确认日确认, 向下立即生效(防假突破/降换手); 采样日默认周三
+    与调仓日(周五)解耦 = 信号比调仓日早2个交易日, 等效额外保守滞后; 2026-08-04 A/B实测
+    周三采样 proxy Cal1.57/real Cal6.44 优于周五采样 1.34/5.83, 保持周三"""
         raw = self.sig.score(dt)
         if self._last_confirmed is None:
             self._last_confirmed = sc
@@ -449,7 +452,7 @@ class DynamicStrategy:
         ws = []
         j = i
         while len(ws) < self.score_confirm and j >= 0:
-            if idx[j].weekday() == 2:
+            if idx[j].weekday() == self.confirm_weekday:
                 ws.append(self.sig.score(idx[j]))
             j -= 1
         L = sc

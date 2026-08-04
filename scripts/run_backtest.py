@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""最终运行器(ETF动态配置skill): 每周三调仓、每次目标分3周三笔(每周三1/3)、三周调整完
+"""最终运行器(ETF动态配置skill v24): 每周五用前一日信号决策、目标缺口1笔当日收盘成交(v22 S阶段45组网格实证)
 输出: 全历史/真实窗口指标、基准对比、分阶段、仓位现状、终端ASCII图表(不生成图片文件)"""
 import sys, os, json
 import numpy as np, pandas as pd
@@ -167,8 +167,11 @@ def term_bars(rows, title, width=42):
 
 # ---------- 主流程 ----------
 def main():
-    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v23.json")
-    tag = sys.argv[2] if len(sys.argv) > 2 else "v23"
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _p1 = os.path.join(_here, "..", "references", "final_cfg_v24.json")
+    _p2 = os.path.join(_here, "references", "final_cfg_v24.json")
+    cfg_file = sys.argv[1] if len(sys.argv) > 1 else (_p1 if os.path.exists(_p1) else _p2)
+    tag = sys.argv[2] if len(sys.argv) > 2 else "v24"
     cfg = json.load(open(cfg_file))
     wd = cfg.get("rebal_weekday", 2); wd_cn = "一二三四五"[wd]
     freq = cfg.get("rebal_freq", "weekly"); n_tw = len(cfg.get("tranche_weights", [1.0]))
@@ -208,14 +211,14 @@ def main():
     print("\n===== 当前仓位管理现状 (数据截至 %s) =====" % str(wdf.index[-1].date()))
     print("  实际持仓(含权重漂移, 以最新交易日收盘计):")
     for s in SLOTS + ["cash"]:
-        nm = ETF_NAMES.get(s, "现金(国债逆回购)")
+        nm = ETF_NAMES.get(s, "现金(逆回购25%+511010 75%)")
         print(f"    {s:<8} {nm:<12} {w_last[s]*100:6.2f}%")
     ds_live = DynamicStrategy(R_PROXY, cfg=dict(cfg, signal_lag=0))
     # 实盘口径: 最新数据日=T-1, 以lag=0实例在T-1数据上计算"下一个周三目标"(等价于周三早盘决策)
     tgt_last = ds_live.regular_target(wdf.index[-1], {"pf_rets": rets})
     print(f"  目标权重(下一个周{wd_cn}决策目标, 用最新可得数据):")
     for s in SLOTS + ["cash"]:
-        nm = ETF_NAMES.get(s, "现金(国债逆回购)")
+        nm = ETF_NAMES.get(s, "现金(逆回购25%+511010 75%)")
         print(f"    {s:<8} {nm:<12} {tgt_last[s]*100:6.2f}%")
     sc_last = ds.state_log[-1] if ds.state_log else None
     print(f"  最近信号: 有效打分={sc_last[1] if sc_last else '-'} (0-9), CN深熊锁={ds._lock['CN']}, US深熊锁={ds._lock['US']}")
@@ -234,7 +237,7 @@ def main():
     navr = {"DYN": rr["_wealths"]["DYN " + tag], "B3均衡": rr["_wealths"]["B3均衡"]}
     term_line_chart(navr, "收益图: 真实ETF窗口 (2025-04-23起, 对数坐标)", log=True)
     its2 = json.load(open(itfile))
-    canon = [("v10", "v10"), ("v15", "v15check2"), ("v17", "v17final"), ("v21", "v21"), ("v22", "v22"), ("v23", "v23")]
+    canon = [("v10", "v10"), ("v15", "v15check2"), ("v17", "v17final"), ("v21", "v21"), ("v22", "v22"), ("v23", "v23"), ("v24", "v24")]
     tags_ok = [lab for lab, k in canon if k in its2]
     def val(lab):
         k = dict(canon)[lab]

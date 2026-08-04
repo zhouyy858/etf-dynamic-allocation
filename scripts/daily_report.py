@@ -11,7 +11,7 @@ from engine import run_backtest
 from strategy import DynamicStrategy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v17.json")
+CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v21.json")
 NAMES = {"159232": "自由现金流", "515100": "红利低波100", "159941": "纳指100",
          "513500": "标普500", "159952": "创业板"}
 SLOTS = ["159232", "515100", "159941", "513500", "159952"]
@@ -47,11 +47,14 @@ def main():
     nav_last = nav_last_date()
     today = pd.Timestamp.now().normalize()
     w_act = wdf.iloc[-1]
-    tgt = ds.regular_target(last, {"pf_rets": rets})
+    # 实盘目标: 最新数据日=T-1收盘; 用signal_lag=0实例在T-1数据上计算"下一个周三决策目标"
+    # (等价于周三早盘用前一日数据决策; 历史统计段仍用cfg内signal_lag=1的严格口径)
+    ds_live = DynamicStrategy(R, cfg=dict(cfg, signal_lag=0))
+    tgt = ds_live.regular_target(last, {"pf_rets": rets})
     sc = ds.state_log[-1][1] if ds.state_log else 0
 
     lines = [f"# ETF动态配置日报 {today:%Y-%m-%d}（{WEEKDAY_CN[today.weekday()]}）", ""]
-    lines.append(f"- **数据截至**: {nav_last or last.date()}（净值口径，最新收盘）")
+    lines.append(f"- **数据截至**: {nav_last or last.date()}（净值口径，最新收盘；决策信号使用截至前一日数据，无未来函数）")
     lines.append(f"- **有效打分**: {sc}/9 ｜ CN深熊锁={'有' if ds._lock['CN'] else '无'} ｜ US深熊锁={'有' if ds._lock['US'] else '无'}")
     for mkt in ["CN", "US"]:
         dd, ok20, ok20_60, rec, ok120 = ds.sig.mkt_info(last, mkt, ds.gate_win)
@@ -67,7 +70,7 @@ def main():
     is_wed = today.weekday() == 2
     gap = max(abs(w_act[s] - tgt[s]) for s in SLOTS + ["cash"])
     if is_wed:
-        action = "今日是周三调仓日：按 v17 规则当日 1 笔成交到位（QDII 溢价>2% 的买入顺延；下单前查 IOPV 溢价率）"
+        action = "今日是周三调仓日：按 v21 规则用前一日(T-1)收盘信号决策，目标缺口分 3 笔（今日收盘成交 1/3，随后 2 个周三各 1/3）；QDII 溢价用 T-2 口径（>3% 注意、>5% 买入暂缓），下单前查 IOPV"
     elif gap > 0.02:
         action = f"非调仓日，仓位与目标基本一致（最大偏差 {pct(gap)}），等待下一个周三检查"
     else:
@@ -109,7 +112,7 @@ def main():
     lines.append(f"- 上一交易日: {pct(last_ret, 2)} ｜ 近5日: {pct(r5, 2)} ｜ 近20日: {pct(r20, 2)}")
     lines.append(f"- 今年以来: {pct(ytd, 2) if ytd == ytd else 'n/a'} ｜ 当前距历史高点: {pct(cur_dd, 2)}")
     lines.append("")
-    lines.append("> 生成: ETF动态配置skill v17（每周三1笔执行+溢价门控+相关性风控+速度刹车+逆回购2.2%）｜ 仅供参考，非投资建议")
+    lines.append("> 生成: ETF动态配置skill v21（每周三前日信号决策+3周三笔+溢价T-2门控+相关性风控+速度刹车+逆回购2.2%+国债ETF5成）｜ 无未来函数口径｜ 仅供参考，非投资建议")
     text = "\n".join(lines)
     print(text)
     if out_path:

@@ -1,0 +1,137 @@
+{
+ "state_map": {
+  "9": [
+   92,
+   4
+  ],
+  "8": [
+   82,
+   7
+  ],
+  "7": [
+   71,
+   10
+  ],
+  "6": [
+   62,
+   13
+  ],
+  "5": [
+   53,
+   16
+  ],
+  "4": [
+   42,
+   18
+  ],
+  "3": [
+   33,
+   21
+  ],
+  "2": [
+   25,
+   24
+  ],
+  "1": [
+   18,
+   27
+  ],
+  "0": [
+   11,
+   30
+  ]
+ },
+ "market_dd": {
+  "CN": [
+   0.07,
+   0.08,
+   0.22,
+   0.1
+  ],
+  "US": [
+   0.1,
+   0.12,
+   0.24,
+   0.15
+  ]
+ },
+ "dd_eq_cap": [
+  [
+   -0.08,
+   85
+  ],
+  [
+   -0.12,
+   75
+  ],
+  [
+   -0.16,
+   65
+  ],
+  [
+   -0.2,
+   55
+  ]
+ ],
+ "hyst_up": 0.58,
+ "hyst_down": 0.18,
+ "min_cash": 0.03,
+ "max_eq": 0.98,
+ "vol_target": 0.19,
+ "gate_win": 120,
+ "growth_split_bull": {
+  "159952": 0.36,
+  "159941": 0.48,
+  "513500": 0.2
+ },
+ "dd_cap_unconditional": true,
+ "defense_momentum": true,
+ "defense_momentum_win": 60,
+ "defense_momentum_t": 3.0,
+ "defense_clamp": [
+  0.35,
+  0.65
+ ],
+ "premium_gate": true,
+ "premium_thr": [
+  0.05,
+  0.08,
+  0.12
+ ],
+ "premium_cut": [
+  0.6,
+  0.3,
+  0.15
+ ],
+ "corr_risk": true,
+ "corr_risk_win": 40,
+ "corr_risk_thr": [
+  0.3,
+  0.42
+ ],
+ "corr_risk_cut": [
+  0.85,
+  0.65
+ ],
+ "speed_brake": true,
+ "speed_brake_win": 5,
+ "speed_brake_thr": -0.04,
+ "speed_brake_cut": 0.6,
+ "speed_brake_recover": 8,
+ "tranche_weights": [
+  0.3333333333333333,
+  0.3333333333333333,
+  0.3333333333333333
+ ],
+ "version": "v21",
+ "repo_rate": 0.022,
+ "floor_pct": {
+  "cn": 5.0,
+  "us": 5.0
+ },
+ "_note": "未来函数修正(v21, 2026-08-04): 1)signal_lag=1 决策只用前一日收盘信号(周三早盘用周二数据); 2)引擎改为先计提当日收益、后收盘成交, 成交份额自下一交易日起计收益(消除1日超前收益); 3)premium_shift=2 QDII单位净值T+1晚间发布, 周三决策严格用T-2溢价; 4)执行由v17当日1笔恢复为每周三3周三笔(严格口径下real Calmar 4.41>3.42, 且符合三周调整完约束); 5)底仓维持5+5(严格口径网格+扰动+压力测试: 2.5+10/0+10历史Calmar略高但在美股危机/共振熊更差、扰动失败更多, 不采纳)。修正后业绩(2026-07-31数据): proxy全历史 CAGR 10.23%/MDD -9.69%/Sharpe 1.09/Calmar 1.06; real窗口 CAGR 24.44%/MDD -5.33%/Sharpe 1.98/Calmar 4.58。诚实边界: 年化20%+仅在real窗口(1.3年)成立, 全历史严格口径约10%; 原v17-v20的16.2%/28.1%含未来函数虚高。复现: scripts/audit_lookahead.py, scripts/exp_v21_search.py(底仓网格), scripts/audit_robustness.py",
+ "cash_bond_pct": 0.5,
+ "cash_bond_code": "511010",
+ "signal_lag": 1,
+ "premium_shift": 2
+}

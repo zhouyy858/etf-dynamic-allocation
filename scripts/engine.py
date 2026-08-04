@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """回测引擎: 静态基准 + 动态策略
-统一约束: 每周三执行调仓; 分笔由tranche_weights配置(默认等分3笔: 决策当周及随后2个周三各1/3;
-v17用[1.0]=决策当日1笔全部成交); 紧急风控任意交易日触发并取代未完成计划; 单边费万5; 闲置现金享逆回购收益
-动态策略: 15%国内底仓 + 15%海外底仓固定不动; 弹性仓按牛熊信号切换; 波动率+回撤刹车"""
+统一约束: 每周三执行调仓; 分笔由tranche_weights配置(默认等分3笔: 决策当周及随后2个周三各1/3,
+三周调整完; 或[1.0]=决策当日1笔全部成交); 紧急风控任意交易日触发并取代未完成计划; 单边费万5;
+闲置现金享逆回购收益(可叠加国债ETF层)
+收益口径(无未来函数): 决策信号使用截至决策日前一交易日的收盘数据(signal_lag=1); 成交按决策日
+收盘价进行, 成交份额自下一交易日起计收益(先计提当日收益、后执行成交); exec_lag=1时成交顺延至次日收盘"""
 import numpy as np, pandas as pd
 from metrics import TRADING_DAYS, annualized_ret, annualized_vol, max_drawdown, sharpe
 
@@ -14,20 +16,24 @@ SLOTS = ["159232", "515100", "159941", "513500", "159952"]
 def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weights=None,
                  start=None, end=None, tranches=TRANCHES, fee=FEE, repo=REPO,
                  min_delta=0.002, name="", tranche_weights=None,
-                 cash_bond_rets=None, cash_bond_pct=0.0):
-    """tranche_weights: 分笔比例列表(如[1.0]立即执行、[0.5,0.5]、[1/3]*3), 默认None=等分tranches笔
+                 cash_bond_rets=None, cash_bond_pct=0.0, exec_lag=0, accrual_mode="pre"):
+    """accrual_mode: "pre"=先按交易前权重计提当日收益再收盘成交(严格无未来, 新买入份额自下一
+    交易日起计收益); "post"=复现旧版行为(成交后按当日收益计提, 仅供审计对照, 勿用于实盘口径)
+    exec_lag: 成交时点 0=决策当日收盘成交(严格口径: 先计提当日收益再成交); 1=决策次日收盘成交
+    tranche_weights: 分笔比例列表(如[1.0]立即执行、[0.5,0.5]、[1/3]*3), 默认None=等分tranches笔
     cash_bond_pct: 闲置现金中配置债券ETF的比例(0~1); cash_bond_rets: 债券ETF日收益序列(如511010),
     缺失日按逆回购repo计息 -> 现金层 = (1-pct)*逆回购 + pct*债券ETF"""
     if tranche_weights is None:
         tw = np.array([1.0 / tranches] * tranches)
     else:
         tw = np.array(tranche_weights, float); tw = tw / tw.sum()
-    """顺序模拟回测。
+    """顺序模拟回测(无未来函数)。
     fixed_weights: 静态权重, 每周三调回目标(分3周三笔)。
-    target_weights_fn(dt, R_up_to_prev, ctx): 动态目标权重(dict, 含cash)或None。
-    分笔规则: 每次决策的目标缺口等分tranches笔, 第1笔决策当日成交, 其余在随后(tranches-1)个
-    周三各成交1笔 -> 每周三调仓、三周调整完; 若上一计划仍有未执行分笔, 常规决策顺延(计划不重叠),
-    紧急风控可取代未完成计划并立即重启新的3周三笔计划。
+    target_weights_fn(dt, R_up_to_prev, ctx): 动态目标权重(dict, 含cash)或None; 策略侧保证
+    信号只使用截至前一日收盘数据, R_up_to_prev 即引擎传入的截至前一日切片。
+    分笔规则: 每次决策的目标缺口按tranche_weights分笔, 第1笔决策当日收盘成交(exec_lag=0),
+    其余在随后(tranches-1)个周三各成交1笔 -> 每周三调仓、三周调整完; 若上一计划仍有未执行分笔,
+    常规决策顺延(计划不重叠), 紧急风控可取代未完成计划并立即重启新的3周三笔计划。
     """
     R = R.copy()
     if start: R = R[R.index >= start]
@@ -58,34 +64,53 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
             j += 1
         return j if j < n else None
 
+    def make_ctx():
+        ctx = ({"pf_rets": pd.Series(pf_rets_ctx, index=dates[:len(pf_rets_ctx)])}
+               if pf_rets_ctx else {"pf_rets": pd.Series(dtype=float)})
+        ctx["equity"] = float(w.sum())
+        ctx["weights"] = w.copy()
+        return ctx
+
     for i in range(n):
         dt = dates[i]
-        # 1) 执行本日到期的分笔
-        for delta in pending.pop(i, []):
-            w = w + delta
-            turnover_day[i] += np.abs(delta).sum()
+        fee_today = 0.0
+        if accrual_mode == "pre":
+            # 严格口径: 先按"上一收盘持仓"计提当日收益, 再收盘执行成交 ->
+            # 新买入/卖出份额自下一交易日起计收益, 不享受成交当日涨跌(消除1日超前收益)
+            cash = 1.0 - w.sum()
+            r = R.iloc[i].values
+            if bond is not None:
+                cash_ret = (1.0 - cash_bond_pct) * repo_d + cash_bond_pct * float(bond.iloc[i])
+            else:
+                cash_ret = repo_d
+            g = w * (1.0 + r)
+            c = cash * (1.0 + cash_ret)
+            factor = float(g.sum() + c)
+            pf_ret = factor - 1.0
+            w = g / factor
+            cash = c / factor
+            for delta in pending.pop(i, []):
+                w = w + delta
+                fee_today += float(np.abs(delta).sum())
+        else:
+            # 旧版口径(仅审计对照): 先执行到期分笔再决策, 当日收益按成交后权重计提
+            for delta in pending.pop(i, []):
+                w = w + delta
+                fee_today += float(np.abs(delta).sum())
         scheduled = sum(len(v) for v in pending.values())
-        # 2) 决策: 首日建仓/每周三常规调仓/日度紧急刹车 (决策用截至前一日数据, 无未来函数)
+        # 决策: 首日建仓/每周三常规调仓/日度紧急刹车 (信号用截至前一日数据, 无未来函数)
         is_rebal = (i == 0) or (dt.weekday() == 2)
         target = None
         if is_rebal:
             if fixed_weights is not None:
                 target = fixed_target()
             elif target_weights_fn is not None:
-                ctx = ({"pf_rets": pd.Series(pf_rets_ctx, index=dates[:len(pf_rets_ctx)])}
-                       if pf_rets_ctx else {"pf_rets": pd.Series(dtype=float)})
-                ctx["equity"] = float(w.sum())
-                ctx["weights"] = w.copy()
-                tgt = target_weights_fn(dt, R.iloc[:i], ctx)
+                tgt = target_weights_fn(dt, R.iloc[:i], make_ctx())
                 if tgt is not None:
                     target = np.array([tgt[s] for s in SLOTS], dtype=float)
         is_emergency = False
         if daily_override_fn is not None:
-            ctx = ({"pf_rets": pd.Series(pf_rets_ctx, index=dates[:len(pf_rets_ctx)])}
-                   if pf_rets_ctx else {"pf_rets": pd.Series(dtype=float)})
-            ctx["equity"] = float(w.sum())
-            ctx["weights"] = w.copy()
-            tgt2 = daily_override_fn(dt, R.iloc[:i], ctx)
+            tgt2 = daily_override_fn(dt, R.iloc[:i], make_ctx())
             if tgt2 is not None:
                 target = np.array([tgt2[s] for s in SLOTS], dtype=float)
                 is_emergency = True
@@ -101,30 +126,40 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
             if i == 0 or np.abs(delta).max() >= min_delta:
                 if is_emergency:
                     pending = {}  # 紧急风控取代未完成计划
-                # 分笔: 第1笔当日执行(按当日净值), 其余在随后各决策周三分笔(比例按tranche_weights)
+                # 分笔: 第1笔当日执行(exec_lag=0)或次日执行(exec_lag=1), 其余在随后各决策周三分笔
                 d0 = delta * tw[0]
-                w = w + d0
-                turnover_day[i] += np.abs(d0).sum()
-                j = i
+                if exec_lag == 0:
+                    w = w + d0
+                    fee_today += float(np.abs(d0).sum())
+                    j = i
+                else:
+                    ex = i + 1
+                    if ex < n:
+                        pending.setdefault(ex, []).append(d0)
+                    j = ex if ex < n else i
                 for t in range(1, len(tw)):
                     j = next_wed(j)
                     if j is None:
                         break
                     pending.setdefault(j, []).append(delta * tw[t])
-        # 3) 组合收益(含费用), 并按当日收益更新权重漂移
-        cash = 1.0 - w.sum()
-        r = R.iloc[i].values
-        fee_today = turnover_day[i] * fee
-        g = w * (1.0 + r)          # 权益增长
-        if bond is not None:
-            cash_ret = (1.0 - cash_bond_pct) * repo_d + cash_bond_pct * float(bond.iloc[i])
+        if accrual_mode == "pre":
+            # 严格口径: 当日收益已在成交前计提完毕, 此处仅扣除当日费用
+            pf_ret -= fee_today * fee
         else:
-            cash_ret = repo_d
-        c = cash * (1.0 + cash_ret)  # 现金增长(逆回购+债券ETF混合)
-        pf_ret = float(g.sum() + c - 1.0 - fee_today)
-        factor = 1.0 + pf_ret
-        w = g / factor
-        cash = c / factor
+            # 旧版口径: 按成交后权重计提当日收益并扣除费用
+            cash = 1.0 - w.sum()
+            r = R.iloc[i].values
+            if bond is not None:
+                cash_ret = (1.0 - cash_bond_pct) * repo_d + cash_bond_pct * float(bond.iloc[i])
+            else:
+                cash_ret = repo_d
+            g = w * (1.0 + r)
+            c = cash * (1.0 + cash_ret)
+            pf_ret = float(g.sum() + c - 1.0 - fee_today * fee)
+            factor = 1.0 + pf_ret
+            w = g / factor
+            cash = c / factor
+        turnover_day[i] = fee_today
         weights_history[i] = np.concatenate([w, [cash]])
         rets[i] = pf_ret
         pf_rets_ctx.append(pf_ret)

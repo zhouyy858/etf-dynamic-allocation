@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-"""动态策略v10: 结构闸门 + 快刹车(成长仓) + 深熊锁定(全部CN/US弹性清零, 仅留15%底仓)
-- 打分9维 -> 状态(成长g/防御d) -> 权重骨架
+"""动态策略v21(无未来函数): 结构闸门 + 快刹车(成长仓) + 深熊锁定(全部CN/US弹性清零, 仅留底仓)
+- 打分9维 -> 状态(成长g/防御d) -> 权重骨架; SignalSet(lag=1): 所有信号只用截至决策日前一交易日收盘数据
 - CN弹性(159952成长 + 515100/159232防御弹性) × CN市场乘数; US弹性(159941/513500额外) × US市场乘数
-- 快刹车: 市场回撤>8%(CN)/10%(US)且跌破SMA20 -> 成长弹性×0.10/0.15
-- 深熊锁定: CN回撤>20%/US回撤>25% -> 该市场全部弹性归零(仅15%底仓), 恢复条件: 回撤收窄或SMA120+双均线确认
-- 组合深度回撤 -> 权益上限(趋势弱时); 15%国内+15%海外底仓固定; 每周三调仓、分笔比例由引擎tranche_weights配置(v17=1笔当日成交);
-- 日度风控触发(组合回撤上限/市场快刹车/深熊锁/闸门导致目标权益显著降低)当日生效并取代未完成计划"""
+- 快刹车: 市场回撤>7%(CN)/10%(US)且跌破SMA20 -> 成长弹性×0.08/0.12
+- 深熊锁定: CN回撤>22%/US回撤>24% -> 该市场全部弹性归零(仅留底仓), 恢复条件: 回撤收窄或SMA120+双均线确认
+- 组合深度回撤 -> 权益上限(趋势弱时); 5%国内+5%海外底仓固定(floor_pct配置); 每周三决策、分3周三笔(引擎tranche_weights);
+- 日度风控触发(组合回撤上限/市场快刹车/深熊锁/闸门导致目标权益显著降低)当日生效并取代未完成计划
+- QDII溢价门控用T-2口径(premium_shift=2, QDII净值T+1晚间发布)"""
+
 import os, numpy as np, pandas as pd
 from data_prep import DATA_DIR
 
@@ -44,7 +46,7 @@ DD_EQ_CAP = [(-0.12, 80), (-0.18, 65), (-0.25, 50)]
 HYST_UP, HYST_DOWN = 0.54, 0.17
 
 class SignalSet:
-    def __init__(self, R, a_mkt_override=None):
+    def __init__(self, R, a_mkt_override=None, lag=0):
         if a_mkt_override is not None:
             hs300 = a_mkt_override
         else:
@@ -57,12 +59,17 @@ class SignalSet:
         self.u_g = lvl["159941"].reindex(R.index).ffill()
         self.u_m = lvl["513500"].reindex(R.index).ffill()
         self.R = R
+        self.lag = int(lag)  # 信号时点: 0=当日收盘, 1=前一日收盘(严格无未来, 实盘T日尾盘用T-1信号)
         self.sma = {}
         for nm, x in [("a_mkt", self.a_mkt), ("a_g", self.a_g), ("u_g", self.u_g), ("u_m", self.u_m)]:
             self.sma[nm] = {w: x.rolling(w, min_periods=10).mean() for w in (20, 60, 120)}
 
-    def score(self, dt):
+    def _idx(self, dt):
         i = self.R.index.get_indexer([dt], method="ffill")[0]
+        return max(0, i - self.lag)
+
+    def score(self, dt):
+        i = self._idx(dt)
         def gt(x, nm, win):
             return 1.0 if (i < len(x) and x.iloc[i] > self.sma[nm][win].iloc[i]) else 0.0
         comps = [gt(self.a_mkt, "a_mkt", 120), gt(self.a_mkt, "a_mkt", 60), gt(self.a_mkt, "a_mkt", 20),
@@ -71,7 +78,7 @@ class SignalSet:
         return int(sum(comps))
 
     def mkt_info(self, dt, market, gate_win=120):
-        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        i = self._idx(dt)
         x = self.a_mkt if market == "CN" else self.u_m
         if i >= len(x):
             return 0.0, True, True, 1.0, True
@@ -88,7 +95,7 @@ class SignalSet:
 
 class DynamicStrategy:
     def __init__(self, R_full, cfg=None, a_mkt_override=None):
-        self.sig = SignalSet(R_full, a_mkt_override=a_mkt_override)
+        self.sig = SignalSet(R_full, a_mkt_override=a_mkt_override, lag=cfg.get("signal_lag", 0) if cfg else 0)
         self.R = R_full
         cfg = cfg or {}
         sm = cfg.get("state_map", STATE_MAP)
@@ -137,7 +144,8 @@ class DynamicStrategy:
         self.growth_clamp = [float(x) for x in cfg.get("growth_clamp", [0.08, 0.60])]
         self.premium_thr = [float(x) for x in cfg.get("premium_thr", PREMIUM_THR)]
         self.premium_cut = [float(x) for x in cfg.get("premium_cut", PREMIUM_CUT)]
-        self._premium = self._load_premium_panel(R_full) if self.premium_gate else None
+        self.premium_shift = int(cfg.get("premium_shift", 1))
+        self._premium = self._load_premium_panel(R_full, self.premium_shift) if self.premium_gate else None
         self.valuation_win = int(cfg.get("valuation_win_days", VALUATION_WIN_DAYS))
         self.valuation_thr = [float(x) for x in cfg.get("valuation_thr", [0.95, 0.98])]
         self.valuation_cut = [float(x) for x in cfg.get("valuation_cut", [0.6, 0.35])]
@@ -153,8 +161,10 @@ class DynamicStrategy:
         self.risk_log = []
 
     @staticmethod
-    def _load_premium_panel(R):
-        """QDII溢价=场内收盘/单位净值-1; 用前一日溢价, 剔除份额折算过渡日, 裁剪极端值"""
+    def _load_premium_panel(R, shift=1):
+        """QDII溢价=场内收盘/单位净值-1; 剔除份额折算过渡日, 裁剪极端值。
+        shift=1: 决策日用前一日(T-1)溢价(场内价T-1已知; QDII单位净值T+1晚间才发布, 严格口径
+        应取shift=2 -> 决策日可用T-2溢价, 两者均晚于T-1收盘价, 无未来函数)"""
         cols = {}
         for code, fn in PREMIUM_FILES.items():
             px = pd.read_csv(_data(fn), parse_dates=["date"]).set_index("date")["close"].sort_index()
@@ -166,7 +176,7 @@ class DynamicStrategy:
                 p = p.drop(pd.Timestamp(PREMIUM_SPLIT_DROP[code]), errors="ignore")
             cols[code] = p.clip(*PREMIUM_CLIP).reindex(R.index).ffill()
         out = pd.DataFrame(cols)
-        return out.shift(1)
+        return out.shift(shift)
 
     def _premium_at(self, dt):
         """返回决策日可用的前一日溢价(取两只QDII较高者, 保守); 无数据返回None"""
@@ -184,7 +194,7 @@ class DynamicStrategy:
         替代固定 growth_split_bull/bear"""
         if not self.growth_rotation:
             return base
-        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        i = self.sig._idx(dt)
         if i < self.growth_rotation_win or i >= len(self.R):
             return base
         codes = ["159952", "159941", "513500"]
@@ -217,7 +227,7 @@ class DynamicStrategy:
         相关性越高 -> 跨市场共振下跌风险越大, 削减成长弹性(防御仓不动)"""
         if not self.corr_risk:
             return 1.0
-        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        i = self.sig._idx(dt)
         if i < self.corr_risk_win or i >= len(self.R):
             return 1.0
         seg = self.R.iloc[i - self.corr_risk_win + 1: i + 1]
@@ -259,7 +269,7 @@ class DynamicStrategy:
         """国内防御双持轮动: 159232(自由现金流) vs 515100(红利低波100) 按相对动量分配防御弹性"""
         if not self.defense_momentum:
             return dict(DEFENSE_SPLIT)
-        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        i = self.sig._idx(dt)
         if i < self.defense_momentum_win or i >= len(self.R):
             return dict(DEFENSE_SPLIT)
         seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
@@ -273,7 +283,7 @@ class DynamicStrategy:
         return {"159232": w232, "515100": 1.0 - w232}
 
     def _momentum_ratio(self, dt, a, b):
-        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        i = self.sig._idx(dt)
         if i < self.defense_momentum_win or i >= len(self.R):
             return None
         seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
@@ -299,7 +309,7 @@ class DynamicStrategy:
         if not self.valuation_gate:
             return 1.0
         code = "159941" if market == "US" else "159952"
-        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        i = self.sig._idx(dt)
         if i < 260:
             return 1.0
         x = self.R[code].iloc[max(0, i - self.valuation_win + 1): i + 1].dropna()
@@ -393,7 +403,7 @@ class DynamicStrategy:
             self._last_confirmed = min(self._last_confirmed, sc)
             return sc
         idx = self.R.index
-        i = idx.get_indexer([dt], method="ffill")[0]
+        i = self.sig._idx(dt)
         ws = []
         j = i
         while len(ws) < self.score_confirm and j >= 0:

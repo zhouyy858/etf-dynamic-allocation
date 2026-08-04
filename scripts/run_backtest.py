@@ -165,10 +165,10 @@ def term_bars(rows, title, width=42):
 
 # ---------- 主流程 ----------
 def main():
-    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v17.json")
-    tag = sys.argv[2] if len(sys.argv) > 2 else "v10"
+    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v21.json")
+    tag = sys.argv[2] if len(sys.argv) > 2 else "v21"
     cfg = json.load(open(cfg_file))
-    print(f"===== 迭代 {tag} | 每周三调仓、每次目标分3周三笔(每周三1/3)、三周调整完 =====")
+    print(f"===== 迭代 {tag} | 每周三决策(前一日信号, 无未来函数)、目标分3周三笔(每周三1/3)、三周调整完 =====")
     rp = run_all(R_PROXY, tag, BACKTEST_START, None, cfg)
     rr = run_all(R_REAL, tag, REAL_START, None, cfg)
     json.dump({k: v for k, v in rp.items() if not k.startswith("_")},
@@ -206,8 +206,10 @@ def main():
     for s in SLOTS + ["cash"]:
         nm = ETF_NAMES.get(s, "现金(国债逆回购)")
         print(f"    {s:<8} {nm:<12} {w_last[s]*100:6.2f}%")
-    tgt_last = ds.regular_target(wdf.index[-1], {"pf_rets": rets})
-    print("  目标权重(最近一次常规决策):")
+    ds_live = DynamicStrategy(R_PROXY, cfg=dict(cfg, signal_lag=0))
+    # 实盘口径: 最新数据日=T-1, 以lag=0实例在T-1数据上计算"下一个周三目标"(等价于周三早盘决策)
+    tgt_last = ds_live.regular_target(wdf.index[-1], {"pf_rets": rets})
+    print("  目标权重(下一个周三决策目标, 用最新可得数据):")
     for s in SLOTS + ["cash"]:
         nm = ETF_NAMES.get(s, "现金(国债逆回购)")
         print(f"    {s:<8} {nm:<12} {tgt_last[s]*100:6.2f}%")

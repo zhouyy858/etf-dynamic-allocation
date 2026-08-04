@@ -28,6 +28,7 @@ OUT = os.path.join(HERE, "..", "out"); os.makedirs(OUT, exist_ok=True)
 CFG20 = json.load(open(f"{SKILL_REF}/final_cfg_v20.json"))
 CFG21 = json.load(open(f"{SKILL_REF}/final_cfg_v21.json"))
 CFG22 = json.load(open(f"{SKILL_REF}/final_cfg_v22.json"))
+CFG22B = json.load(open(f"{SKILL_REF}/final_cfg_v22b.json"))
 bond = rets_from(read_table("511010_nav.csv"), "cum_nav")
 R, _ = build_panel("proxy"); Rr, _ = build_panel("real")
 
@@ -59,6 +60,7 @@ MODES = [
     ("D   前日信号+次日成交",       CFG20, DynamicStrategy, "pre", 1, [1.0],   False),
     ("v21 严格(3周三笔)",            CFG21, DynamicStrategy, "pre", 0, [1/3]*3, True),
     ("v22 严格(周五weekly1笔)",      CFG22, DynamicStrategy, "pre", 0, [1.0],   True),
+    ("v22b 严格(候选定稿)",          CFG22B, DynamicStrategy, "pre", 0, [1.0],   True),
 ]
 res = {}
 for name, cfg, cls, am, el, tw, st in MODES:
@@ -79,13 +81,17 @@ v_p = res["v21 严格(3周三笔)"]["proxy"]["cagr"]
 v_r = res["v21 严格(3周三笔)"]["real"]["cagr"]
 w_p = res["v22 严格(周五weekly1笔)"]["proxy"]["cagr"]
 w_r = res["v22 严格(周五weekly1笔)"]["real"]["cagr"]
+b_p = res["v22b 严格(候选定稿)"]["proxy"]["cagr"]
+b_r = res["v22b 严格(候选定稿)"]["real"]["cagr"]
 assert abs(old_p - 0.1620) < 0.005, f"旧口径proxy复现失败: {old_p:.4f}"
 assert abs(old_r - 0.2810) < 0.01, f"旧口径real复现失败: {old_r:.4f}"
 assert abs(v_p - 0.1023) < 0.005, f"严格proxy回归失败(v21): {v_p:.4f}"
 assert abs(v_r - 0.2444) < 0.01, f"严格real回归失败(v21): {v_r:.4f}"
 assert abs(w_p - 0.1049) < 0.01, f"严格proxy回归失败(v22): {w_p:.4f}"
 assert abs(w_r - 0.2809) < 0.01, f"严格real回归失败(v22): {w_r:.4f}"
-print("\n[ok] 旧口径复现 v20 发布值(16.20%/28.10%) 通过; 严格口径复现 v21(10.23%/24.44%) 与 v22(10.49%/28.09%) 通过")
+assert abs(b_p - 0.1081) < 0.01, f"严格proxy回归失败(v22b): {b_p:.4f}"
+assert abs(b_r - 0.2893) < 0.01, f"严格real回归失败(v22b): {b_r:.4f}"
+print("\n[ok] 旧口径复现 v20 发布值(16.20%/28.10%) 通过; 严格口径复现 v21/v22/v22b 通过")
 
 print("\n===== 压力测试 (严格口径 vs 旧口径) =====")
 synth, s_idx = synthetic_resonance(Rr, ("2024-09-02", "2026-07-31"), -0.30, -0.20, -0.25)

@@ -160,6 +160,22 @@ class DynamicStrategy:
         self.valuation_cut = [float(x) for x in cfg.get("valuation_cut", [0.6, 0.35])]
         self.downside_vol = bool(cfg.get("downside_vol", False))
         self._prev_eff = None
+        self.am_gate = bool(cfg.get("am_gate", False))
+        self.am_win = int(cfg.get("am_win", 120))
+        self.am_cut = float(cfg.get("am_cut", 0.5))
+        self.regime_gate = bool(cfg.get("regime_gate", False))
+        self.regime_win = int(cfg.get("regime_win", 250))
+        self.regime_hist = int(cfg.get("regime_hist", 250))
+        self.regime_bands = [float(x) for x in cfg.get("regime_bands", [0.60, 0.75, 0.90])]
+        self.regime_cuts = [float(x) for x in cfg.get("regime_cuts", [1.0, 0.8, 0.5, 0.25])]
+        self._regime_pct = None
+        if self.regime_gate:
+            try:
+                a = self.sig.a_mkt.pct_change().rolling(self.regime_win).std() * np.sqrt(252)
+                self._regime_pct = a.rolling(self.regime_hist, min_periods=60).apply(
+                    lambda x: float((x[-1] >= x).mean()), raw=True)
+            except Exception:
+                self._regime_pct = None
         fp = cfg.get("floor_pct", {"cn": 15.0, "us": 15.0})
         cn_f, us_f = float(fp["cn"]), float(fp["us"])
         self.floor = {"159232": cn_f / 2.0, "515100": cn_f / 2.0,
@@ -491,6 +507,14 @@ class DynamicStrategy:
                 out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut + prem_freed * m_cn_g * m_cn_all
         for s in self.exclude:
             out[s] = 0.0
+        if self.am_gate:
+            i = self.sig._idx(dt)
+            if i >= self.am_win:
+                seg = self.R.iloc[i - self.am_win + 1: i + 1]
+                for s in ("159952", "159941", "513500"):
+                    g = float((1 + seg[s].fillna(0.0)).prod()) - 1.0
+                    if g < 0:
+                        out[s] = self.floor[s] + (out[s] - self.floor[s]) * self.am_cut
         return out
 
     def regular_target(self, dt, ctx):
@@ -523,6 +547,18 @@ class DynamicStrategy:
         if scale < 1.0:
             for s in SLOTS:
                 out[s] = self.floor[s] + (out[s] - self.floor[s]) * scale
+        if self.regime_gate and self._regime_pct is not None:
+            i = self.sig._idx(dt)
+            if i >= 0 and not np.isnan(self._regime_pct.iloc[i]):
+                p = float(self._regime_pct.iloc[i])
+                cut = self.regime_cuts[0]
+                for b, c in zip(self.regime_bands, self.regime_cuts[1:]):
+                    if p >= b:
+                        cut = c
+                if cut < 1.0:
+                    for s in SLOTS:
+                        out[s] = self.floor[s] + (out[s] - self.floor[s]) * cut
+                    scale = min(scale, cut)
         self.risk_log.append((dt, sc, scale))
         return self._finalize(out)
 

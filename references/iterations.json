@@ -260,5 +260,25 @@
   "real_calmar": 6.59,
   "avg_cash": 0.58,
   "turnover": 117.4
+ },
+ "v23_定向优化": {
+  "变更": "v23(2026-08-04)定向优化(基于GitHub调研zhangsensen三层验证/UniversalRotation/五福/Dual-Momentum + P阶段定向搜索, 严格口径逐项单测): 1)growth_split_bull 36/48/20->35/55/10; 2)growth_split_bear 44/36/20->50/30/20; 3)min_delta 0.02->0.035。已证伪: 绝动量门am_gate/A股波动率分档门regime_gate(round1, 收益损耗大)。",
+  "动机": "用户要求继续优化且不过拟合; 唯一有效方向=成长拆分微调+换手抑制(收益+0.3pp/Cal+0.04), 其余候选全证伪, 已到该5标的组合严格口径下的优化边界",
+  "验证": "WFO训练窗Cal1.60/OOS1.45(v22:1.56/1.43); 压力全情景MDD<=-7.93%; 扰动88次13次恶化>10%(v22:11/88); 无未来函数审计通过; 分量扰动发现bull创业板悬崖(<=33% Cal1.11), 护栏>=34%",
+  "proxy": {
+   "cagr": 0.1081,
+   "mdd": -0.0684,
+   "sharpe": 1.18,
+   "calmar": 1.58,
+   "turnover": 114.5
+  },
+  "real": {
+   "cagr": 0.2893,
+   "mdd": -0.0441,
+   "sharpe": 2.33,
+   "calmar": 6.56,
+   "turnover": 15.4
+  },
+  "avg_cash": 0.58
  }
 }

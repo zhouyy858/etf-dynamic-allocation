@@ -65,6 +65,16 @@ def mut_market_dd(cfg, mkt, f):
     c["market_dd"] = md
     return c
 
+
+def mut_growth_split(cfg, key, f):
+    c = copy.deepcopy(cfg)
+    gs = dict(c.get(key))
+    total = sum(gs.values())
+    gs = {s: max(0.01, round(v * f, 4)) for s, v in gs.items()}
+    t2 = sum(gs.values())
+    gs = {s: round(v / t2, 6) for s, v in gs.items()}
+    c[key] = gs
+    return c
 PERTURBS = [
     ("state_map_growth", lambda c, f: mut_state_map(c, f)),
     ("vol_target", lambda c, f: mut_scalar(c, "vol_target", f)),
@@ -87,6 +97,8 @@ PERTURBS = [
     ("speed_brake_cut", lambda c, f: mut_scalar(c, "speed_brake_cut", f)),
     ("speed_brake_recover", lambda c, f: mut_scalar(c, "speed_brake_recover", f)),
     ("min_delta", lambda c, f: mut_scalar(c, "min_delta", f)),
+    ("growth_split_bull", lambda c, f: mut_growth_split(c, "growth_split_bull", f)),
+    ("growth_split_bear", lambda c, f: mut_growth_split(c, "growth_split_bear", f)),
     ("floor_cn", lambda c, f: mut_floor(c, "cn", f)),
     ("floor_us", lambda c, f: mut_floor(c, "us", f)),
 ]

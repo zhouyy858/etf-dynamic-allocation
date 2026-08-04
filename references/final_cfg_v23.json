@@ -1,0 +1,144 @@
+{
+ "state_map": {
+  "0": [
+   5,
+   30
+  ],
+  "1": [
+   15,
+   29
+  ],
+  "2": [
+   25,
+   28
+  ],
+  "3": [
+   36,
+   26
+  ],
+  "4": [
+   39,
+   21
+  ],
+  "5": [
+   44,
+   16
+  ],
+  "6": [
+   66,
+   14
+  ],
+  "7": [
+   65,
+   10
+  ],
+  "8": [
+   85,
+   6
+  ],
+  "9": [
+   81,
+   3
+  ]
+ },
+ "market_dd": {
+  "CN": [
+   0.07,
+   0.05,
+   0.18,
+   0.14
+  ],
+  "US": [
+   0.13,
+   0.12,
+   0.24,
+   0.15
+  ]
+ },
+ "dd_eq_cap": [
+  [
+   -0.08,
+   85
+  ],
+  [
+   -0.12,
+   75
+  ],
+  [
+   -0.16,
+   65
+  ],
+  [
+   -0.2,
+   55
+  ]
+ ],
+ "hyst_up": 0.66,
+ "hyst_down": 0.24,
+ "min_cash": 0.03,
+ "max_eq": 0.98,
+ "vol_target": 0.19,
+ "gate_win": 100,
+ "growth_split_bull": {
+  "159952": 0.35,
+  "159941": 0.55,
+  "513500": 0.1
+ },
+ "dd_cap_unconditional": true,
+ "defense_momentum": true,
+ "defense_momentum_win": 80,
+ "defense_momentum_t": 4.0,
+ "defense_clamp": [
+  0.4,
+  0.6
+ ],
+ "premium_gate": true,
+ "premium_thr": [
+  0.05,
+  0.08,
+  0.12
+ ],
+ "premium_cut": [
+  0.6,
+  0.3,
+  0.15
+ ],
+ "corr_risk": true,
+ "corr_risk_win": 40,
+ "corr_risk_thr": [
+  0.3,
+  0.42
+ ],
+ "corr_risk_cut": [
+  0.8,
+  0.6
+ ],
+ "speed_brake": true,
+ "speed_brake_win": 5,
+ "speed_brake_thr": -0.04,
+ "speed_brake_cut": 0.5,
+ "speed_brake_recover": 8,
+ "tranche_weights": [
+  1.0
+ ],
+ "version": "v23",
+ "repo_rate": 0.022,
+ "floor_pct": {
+  "cn": 0.0,
+  "us": 7.5
+ },
+ "_note": "v23(2026-08-04)定稿 = v22 + 3项定向优化(基于GitHub调研 zhangsensen三层验证/UniversalRotation/五福/Dual-Momentum 与 P阶段定向搜索, 全部在严格无未来函数口径下单测): 1)growth_split_bull 36/48/20->35/55/10(标普10pp转纳指, 牛市进攻微调); 2)growth_split_bear 44/36/20->50/30/20(熊市状态内成长桶偏向创业板, 压纳指); 3)min_delta 0.02->0.035(调仓缺口门槛, 换手117->114)。业绩(2026-07-31, 严格口径): proxy全历史 10.81%/-6.84%/Cal1.58(v22: 10.49/-6.79/1.54); real窗口 28.93%/-4.41%/Cal6.56(v22: 28.09/-4.26/6.59); WFO训练窗1.60/OOS1.45均优于v22(1.56/1.43); 压力全情景MDD<=-7.93%(2015股灾-8.73/-7.17, 2021-22熊-0.08/-7.93, 共振熊-1.78/-7.31)。防过拟合: 88次扰动13次恶化>10%与v22(11/88)相当; 分量扰动审计发现bull创业板权重悬崖(34-35%平台Cal1.58-1.60, <=33%暴跌至1.11), 硬护栏: 创业板bull权重不得低于34%, 不得再沿此轴外推。诚实边界: 年化20+%仅real窗口成立。",
+ "cash_bond_pct": 0.5,
+ "cash_bond_code": "511010",
+ "signal_lag": 1,
+ "premium_shift": 2,
+ "score_confirm_weeks": 2,
+ "rebal_weekday": 4,
+ "rebal_freq": "weekly",
+ "growth_split_bear": {
+  "159952": 0.5,
+  "159941": 0.3,
+  "513500": 0.2
+ },
+ "min_delta": 0.035
+}

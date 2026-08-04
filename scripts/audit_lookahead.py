@@ -89,8 +89,8 @@ assert abs(v_p - 0.1023) < 0.005, f"严格proxy回归失败(v21): {v_p:.4f}"
 assert abs(v_r - 0.2444) < 0.01, f"严格real回归失败(v21): {v_r:.4f}"
 assert abs(w_p - 0.1049) < 0.01, f"严格proxy回归失败(v22): {w_p:.4f}"
 assert abs(w_r - 0.2809) < 0.01, f"严格real回归失败(v22): {w_r:.4f}"
-assert abs(b_p - 0.1081) < 0.01, f"严格proxy回归失败(v22b): {b_p:.4f}"
-assert abs(b_r - 0.2893) < 0.01, f"严格real回归失败(v22b): {b_r:.4f}"
+assert abs(b_p - 0.1056) < 0.01, f"严格proxy回归失败(v22b): {b_p:.4f}"  # 2026-08-03数据修正后
+assert abs(b_r - 0.2804) < 0.01, f"严格real回归失败(v22b): {b_r:.4f}"
 print("\n[ok] 旧口径复现 v20 发布值(16.20%/28.10%) 通过; 严格口径复现 v21/v22/v22b 通过")
 
 print("\n===== 压力测试 (严格口径 vs 旧口径) =====")

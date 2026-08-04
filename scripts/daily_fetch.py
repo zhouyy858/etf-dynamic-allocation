@@ -14,13 +14,41 @@ CSINDEX = [("932365", "中证全指自由现金流"), ("930955", "中证红利�
 
 def merge_save(path, df, cols):
     df = df.copy()
+    if df.index.name == "date":
+        df = df.reset_index()
     if os.path.exists(path):
         old = pd.read_csv(path, parse_dates=["date"])
-        df = pd.concat([old, df.reset_index()], ignore_index=True)
+        df = pd.concat([old, df], ignore_index=True)
     df["date"] = pd.to_datetime(df["date"])
     df = df.drop_duplicates("date", keep="last").sort_values("date")
     keep = ["date"] + [c for c in cols if c in df.columns]
     df[keep].to_csv(path, index=False)
+
+
+def fetch_price_latest(sym):
+    """腾讯fqkline 场内价(仅取close), 用于QDII溢价门控与国债ETF日度价格"""
+    start = (pd.Timestamp.now() - pd.Timedelta(days=45)).strftime("%Y-%m-%d")
+    url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+    p = f"{sym},day,{start},{pd.Timestamp.now():%Y-%m-%d},120,qfq"
+    j = requests.get(url, params={"param": p}, headers=H, timeout=30).json()
+    d = (j.get("data") or {}).get(sym) or {}
+    day = d.get("day") or d.get("qfqday") or []
+    df = pd.DataFrame(day, columns=["date", "open", "close", "high", "low", "vol"])
+    df["close"] = pd.to_numeric(df["close"], errors="coerce")
+    return df[["date", "close"]].dropna()
+
+
+def fetch_bond_nav(sym="sh511010"):
+    """国债ETF 511010: 东财LJJZ近期断档(140.7->1.455), 改用腾讯qfqday场内价
+    映射 unit_nav=cum_nav=close(刻度与既有净值一致), ret_pct=日涨幅%"""
+    df = fetch_price_latest(sym)
+    if df.empty:
+        return pd.DataFrame(columns=["unit_nav", "cum_nav", "ret_pct"])
+    df = df.set_index("date").sort_index()
+    df["unit_nav"] = df["close"].astype(float)
+    df["cum_nav"] = df["close"].astype(float)
+    df["ret_pct"] = (df["close"].pct_change().fillna(0.0) * 100).round(6)
+    return df[["unit_nav", "cum_nav", "ret_pct"]]
 
 def fetch_nav_latest(fund):
     url = "https://api.fund.eastmoney.com/f10/lsjz"
@@ -35,7 +63,8 @@ def fetch_tencent_latest(sym):
     url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
     p = f"{sym},day,{start},{pd.Timestamp.now():%Y-%m-%d},100,qfq"
     j = requests.get(url, params={"param": p}, headers=H, timeout=30).json()
-    day = ((j.get("data") or {}).get(sym) or {}).get("day") or []
+    d = (j.get("data") or {}).get(sym) or {}
+    day = d.get("day") or d.get("qfqday") or []
     df = pd.DataFrame(day, columns=["date", "open", "close", "high", "low", "vol"])
     df["close"] = pd.to_numeric(df["close"], errors="coerce")
     return df
@@ -74,6 +103,22 @@ def main():
         except Exception as e:
             print(f"[FAIL csindex] {code}: {str(e)[:120]}"); fail += 1
         time.sleep(0.4)
+    # QDII 场内价(溢价门控用) + 国债ETF 511010 (东财LJJZ断档, 用腾讯场内价映射净值)
+    for sym, fn in [("sz159941", "qdii_price_159941.csv"), ("sh513500", "qdii_price_513500.csv")]:
+        try:
+            df = fetch_price_latest(sym); df["date"] = pd.to_datetime(df["date"])
+            merge_save(f"{DATA}/{fn}", df.set_index("date"), ["close"])
+            ok += 1
+        except Exception as e:
+            print(f"[FAIL price] {sym}: {str(e)[:120]}"); fail += 1
+        time.sleep(0.4)
+    try:
+        dfb = fetch_bond_nav()
+        if not dfb.empty:
+            merge_save(f"{DATA}/511010_nav.csv", dfb, ["unit_nav", "cum_nav", "ret_pct"])
+            ok += 1
+    except Exception as e:
+        print(f"[FAIL bond] 511010: {str(e)[:120]}"); fail += 1
     print(f"增量更新完成: 成功{ok} 失败{fail} ｜ 目录: {DATA}")
 
 if __name__ == "__main__":

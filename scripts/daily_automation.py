@@ -67,12 +67,12 @@ def main():
     env = dict(os.environ)
     env["ETF_DATA_DIR"] = DATA_DIR
 
-    # 首次运行: 用 skill 自带数据做种子
-    if not any(f.startswith("panel_proxy_rets") for f in os.listdir(DATA_DIR)):
-        for f in os.listdir(os.path.join(SKILL, "assets", "data")):
-            if f.endswith(".csv"):
-                shutil.copy(os.path.join(SKILL, "assets", "data", f), os.path.join(DATA_DIR, f))
-        logmsg("[seed] 已从 skill 数据目录初始化")
+    # 种子/补齐: 每次运行把 skill 自带数据中缺失的 csv 复制到工作目录(幂等)
+    # 修复: 2026-08-04 日报失败——工作目录缺 qdii_price_*.csv/511010 等, 原逻辑仅首次运行复制
+    for f in os.listdir(os.path.join(SKILL, "assets", "data")):
+        if f.endswith(".csv") and not os.path.exists(os.path.join(DATA_DIR, f)):
+            shutil.copy(os.path.join(SKILL, "assets", "data", f), os.path.join(DATA_DIR, f))
+            logmsg(f"[seed] 补齐缺失数据文件 {f}")
 
     before = None
     if os.path.exists(STATE):

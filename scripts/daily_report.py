@@ -38,7 +38,7 @@ def main():
     R, W = build_panel("proxy")
     ds = DynamicStrategy(R, cfg=cfg)
     bond = rets_from(read_table("511010_nav.csv"), "cum_nav") if cfg.get("cash_bond_pct") else None
-    res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23", min_delta=0.02, repo=cfg.get("repo_rate", 0.022),
+    res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23", min_delta=cfg.get("min_delta", 0.02), repo=cfg.get("repo_rate", 0.022),
                        tranche_weights=cfg.get("tranche_weights"),
                        cash_bond_rets=bond, cash_bond_pct=cfg.get("cash_bond_pct", 0.0),
                        rebal_weekday=cfg.get("rebal_weekday", 2), rebal_freq=cfg.get("rebal_freq", "weekly"), strict=True)

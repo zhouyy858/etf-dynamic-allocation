@@ -108,7 +108,9 @@ $PY /path/to/skill/scripts/search.py 120 23
 ## 每日自动化（每个交易日 09:00）
 
 - 入口：`scripts/daily_automation.py`（由 launchd `com.zhouyy858.etf-daily-report` 周一至五 09:00 触发）。
-- 流程：`scripts/daily_fetch.py` 增量拉取最近约20个交易日数据 → 重建面板 → `scripts/daily_report.py` 生成日报 → macOS 通知（可选微信/iOS 推送）。
+- 流程：`scripts/daily_fetch.py` 增量拉取最近约20个交易日数据 → 重建面板 → `scripts/daily_report.py` 生成日报 → **自动更新 README「📊 当前持仓现状」段（实际持仓 vs 下周五目标 + 信号/市场/QDII溢价状态）→ 同步数据回 `assets/data/` → git commit + push 到 GitHub** → macOS 通知（可选微信/iOS 推送）。
+- 推送凭据：`~/.config/etf_skill/git_token`（chmod 600，不入库）或环境变量 `ETF_GIT_TOKEN`；无 token 时仅本地更新并记日志。
+- **工作流规则（每次迭代/数据更新后必须执行）**：把 `run_backtest.py`/日报的仓位现状（实际 vs 目标、有效打分、市场状态、QDII 溢价）更新进 README「当前持仓现状」段并推送到 GitHub；数据文件同步 `assets/data/`。
 - 环境变量：`ETF_DATA_DIR` 数据目录（默认 `assets/data`）；`ETF_REPORT_DIR` 报告目录（默认 `~/ETF策略日报`，含 `data/`、`reports/`、`logs/`）。
 - 交易日判定：以 ETF 净值最后日期是否更新为准，节假日/无新数据自动跳过、不发送。
 - 可选推送：在 `~/.config/etf_skill/notify.json` 写 `{"serverchan_key":"...","bark_url":"https://api.day.app/xxx"}`。

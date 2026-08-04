@@ -55,6 +55,90 @@ def nav_last_date():
                 mx = d
     return mx
 
+def parse_report_section(report_md):
+    """从日报解析: 仓位表(实际/目标) + 有效打分 + 市场状态 + QDII溢价"""
+    lines = open(report_md, encoding="utf-8").read().splitlines()
+    out = {"rows": [], "score": "", "cn": "", "us": "", "premium": [], "date": ""}
+    for l in lines:
+        if l.startswith("| 标的"):
+            continue
+        if l.startswith("| ---"):
+            continue
+        if l.startswith("| 159232") or l.startswith("| 515100") or l.startswith("| 159941") or \
+           l.startswith("| 513500") or l.startswith("| 159952") or l.startswith("| 现金"):
+            cells = [c.strip() for c in l.strip("|").split("|")]
+            out["rows"].append(cells[:3])  # [名称, 实际, 目标]
+        if "有效打分" in l:
+            out["score"] = l.strip()
+        if "数据截至" in l:
+            import re as _re
+            m = _re.search(r"\d{4}-\d{2}-\d{2}", l)
+            if m: out["date"] = m.group(0)
+        if l.startswith("- **CN市场**"):
+            out["cn"] = l.strip().lstrip("- ")
+        if l.startswith("- **US市场**"):
+            out["us"] = l.strip().lstrip("- ")
+        if l.startswith("- 纳指100") or l.startswith("- 标普500"):
+            out["premium"].append(l.strip().lstrip("- "))
+    return out
+
+def update_readme_positions(sec, logmsg):
+    """更新 SKILL README 的 POSITIONS 区块(实际持仓 vs 目标 + 信号状态)"""
+    readme = os.path.join(SKILL, "README.md")
+    if not os.path.exists(readme) or not sec["rows"]:
+        return False
+    start_marker, end_marker = "<!-- POSITIONS-START -->", "<!-- POSITIONS-END -->"
+    s = open(readme, encoding="utf-8").read()
+    if start_marker not in s or end_marker not in s:
+        logmsg("[readme] README 缺少 POSITIONS 标记, 跳过自动更新")
+        return False
+    date_str = sec.get("date", "") or ""
+    t = [f"> 数据截至 **{date_str}**（净值口径）｜ v25 定稿｜ 本段由每日自动化在数据刷新后更新并推送", "",
+         "| 标的 | 实际持仓 | 目标（下周五决策） |", "|---|---|---|"]
+    for name, act, tgt in sec["rows"]:
+        t.append(f"| {name} | {act} | {tgt} |")
+    t += ["", sec["score"] if sec["score"] else "-",
+          "- " + sec["cn"] if sec["cn"] else "", "- " + sec["us"] if sec["us"] else ""]
+    if sec["premium"]:
+        t += ["- **QDII 溢价**：" + "；".join(sec["premium"])]
+    blk = "\n".join(t)
+    new = s[:s.index(start_marker) + len(start_marker)] + "\n" + blk + "\n" + s[s.index(end_marker):]
+    open(readme, "w", encoding="utf-8").write(new)
+    logmsg(f"[readme] 已更新 README 持仓段({len(sec['rows'])}行)")
+    return True
+
+def git_sync_skill(logmsg):
+    """同步数据→SKILL仓库并 commit+push(本地 token 配置 ~/.config/etf_skill/git_token 或环境变量 ETF_GIT_TOKEN)"""
+    # 先把工作目录最新数据复制回 skill assets/data, 保证 README/回测可复现
+    src = os.path.join(WORK, "data")
+    dst = os.path.join(SKILL, "assets", "data")
+    n = 0
+    if os.path.isdir(src):
+        for f in os.listdir(src):
+            if f.endswith(".csv"):
+                sp, dp = os.path.join(src, f), os.path.join(dst, f)
+                if not os.path.exists(dp) or os.path.getsize(sp) != os.path.getsize(dp):
+                    shutil.copy(sp, dp); n += 1
+    token = os.environ.get("ETF_GIT_TOKEN")
+    if not token:
+        tp = os.path.expanduser("~/.config/etf_skill/git_token")
+        if os.path.exists(tp):
+            token = open(tp).read().strip()
+    if not token:
+        logmsg(f"[git] 无 token(环境变量 ETF_GIT_TOKEN 或 ~/.config/etf_skill/git_token), 仅本地更新数据{n}个文件, 未推送")
+        return
+    url = f"https://{token}@github.com/zhouyy858/etf-dynamic-allocation.git"
+    run(["git", "-C", SKILL, "add", "-A"], timeout=300)
+    rc, out, err = run(["git", "-C", SKILL, "commit", "-m", f"每日数据+持仓更新 {dt.date.today().isoformat()}"], timeout=300)
+    if rc != 0 and "nothing to commit" not in out + err:
+        logmsg(f"[git] commit 失败: {err[:200]}")
+        return
+    rc, out, err = run(["git", "-C", SKILL, "push", url, "main"], timeout=600)
+    if rc == 0:
+        logmsg("[git] 已推送到 GitHub")
+    else:
+        logmsg(f"[git] push 失败(网络可能抖动, 稍后手动重试): {err[:150]}")
+
 def main():
     do_fetch = "--no-fetch" not in sys.argv
     log = open(os.path.join(LOG_DIR, f"run_{dt.date.today():%Y%m%d}.log"), "a", encoding="utf-8")
@@ -107,6 +191,11 @@ def main():
         logmsg("[report] 生成失败，仍发通知提示")
         notify("ETF策略日报", "生成失败", err[:200])
         return
+
+    # 4.5) 更新 README 持仓段 + 同步数据 + 推送到 GitHub
+    sec = parse_report_section(out_md)
+    update_readme_positions(sec, logmsg)
+    git_sync_skill(logmsg)
 
     # 5) 发送通知
     head = out.strip().splitlines()

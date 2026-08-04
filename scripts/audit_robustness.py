@@ -7,22 +7,24 @@
 import sys, os, json, copy, time
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from data_prep import build_panel
+from data_prep import build_panel, read_table, rets_from
 from engine import run_backtest, evaluate
 from strategy import DynamicStrategy
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "out")
-CFG = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "out/final_cfg_v15.json"))
-TAG = sys.argv[2] if len(sys.argv) > 2 else "v15"
-TW = json.loads(sys.argv[3]) if len(sys.argv) > 3 else None  # 如 [1.0] 测1笔立即执行
+CFG = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "../references/final_cfg_v21.json"))
+TAG = sys.argv[2] if len(sys.argv) > 2 else "v21"
+TW = json.loads(sys.argv[3]) if len(sys.argv) > 3 else CFG.get("tranche_weights")
 R, W = build_panel("proxy")
 START = "2014-06-23"
 
 def run(cfg):
     ds = DynamicStrategy(R, cfg=cfg)
+    bond = rets_from(read_table("511010_nav.csv"), "cum_nav") if cfg.get("cash_bond_pct") else None
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(),
                        start=START, name="DYN", min_delta=cfg.get("min_delta", 0.02), repo=cfg.get("repo_rate", 0.022),
-                       tranche_weights=TW)
+                       tranche_weights=TW, cash_bond_rets=bond, cash_bond_pct=cfg.get("cash_bond_pct", 0.0),
+                       rebal_weekday=cfg.get("rebal_weekday", 2), rebal_freq=cfg.get("rebal_freq", "weekly"), strict=True)
     e = evaluate(res)
     return dict(cagr=e["cagr"]*100, mdd=e["max_dd"]*100, sharpe=e["sharpe"],
                 calmar=e["calmar"], turnover=e["turnover"], cash=e["avg_cash"]*100)

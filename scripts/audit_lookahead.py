@@ -1,24 +1,25 @@
 # -*- coding: utf-8 -*-
-"""未来函数审计(可复现): 时序口径对照
-外部审查发现原v17-v20回测含"当日收盘信号+当日收盘成交+成交仓位计提当日收益"超前口径。
-本脚本用同一引擎的两种计提模式(accrual_mode=pre/post) + 信号滞后(signal_lag) + 成交滞后(exec_lag)
-量化各口径差异, 并验证旧口径可复现已发布的v20数字(proxy 16.20%/-5.78%, real 28.10%/-5.34%)。
+"""未来函数审计(可复现, v22): 时序口径对照 + 旧口径复现校验
+生产策略(scripts/strategy.py)已硬编码"信号最小滞后1个交易日"(SignalSet._idx), 配置无法绕过;
+旧版"当日信号"泄漏行为仅在本审计脚本内以私有子类(LeakySignalSet)复现, 生产代码无泄漏路径。
 
 口径:
-  OLD 旧发布口径   : accrual=post + signal_lag=0 + exec_lag=0 + 1笔成交  (v20发布值)
-  B   严格(v21)   : accrual=pre  + signal_lag=1 + exec_lag=0 + 3周三笔  (周三早盘用周二数据, 收盘成交)
-  A0  同日信号对照 : accrual=pre  + signal_lag=0 + exec_lag=0 + 1笔成交  (仅修计提, 保留同日信号)
-  C   次日成交对照 : accrual=pre  + signal_lag=0 + exec_lag=1 + 1笔成交
-  D   双滞后对照   : accrual=pre  + signal_lag=1 + exec_lag=1 + 1笔成交
+  OLD 旧发布口径(含未来函数) : Leaky信号(当日) + 引擎post计提(成交计当日收益) + 1笔成交
+  A0  仅修计提·同日信号      : Leaky信号 + pre计提 + 1笔成交
+  B   前日信号+当日成交(1笔) : 严格信号 + pre计提 + 1笔成交
+  C   当日信号+次日成交      : Leaky信号 + pre计提 + 次日成交
+  D   前日信号+次日成交      : 严格信号 + pre计提 + 次日成交
+  v21/v22 严格(定稿)         : 严格信号 + pre计提 + 每周三3周三笔 + 溢价T-2
+
 用法: python3 scripts/audit_lookahead.py
-输出: 终端对照表 + out/audit_lookahead.json
+输出: 终端对照表 + out/audit_lookahead.json; 断言旧口径=16.20%/28.10%、严格口径=v21发布值
 """
 import sys, os, json
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from data_prep import build_panel, read_table, rets_from
 from engine import run_backtest, evaluate
-from strategy import DynamicStrategy
+from strategy import DynamicStrategy, SignalSet
 from stress_test import synthetic_resonance
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,58 +27,78 @@ SKILL_REF = os.path.join(HERE, "..", "references")
 OUT = os.path.join(HERE, "..", "out"); os.makedirs(OUT, exist_ok=True)
 CFG20 = json.load(open(f"{SKILL_REF}/final_cfg_v20.json"))
 CFG21 = json.load(open(f"{SKILL_REF}/final_cfg_v21.json"))
+CFG22 = json.load(open(f"{SKILL_REF}/final_cfg_v22.json"))
 bond = rets_from(read_table("511010_nav.csv"), "cum_nav")
 R, _ = build_panel("proxy"); Rr, _ = build_panel("real")
 
-def run(R, start, tag, cfg, accrual="pre", signal_lag=0, exec_lag=0, tw=None):
-    c = dict(cfg); c["signal_lag"] = signal_lag
-    ds = DynamicStrategy(R, cfg=c)
+class LeakySignalSet(SignalSet):
+    """仅审计用: 复现旧版"决策日使用当日收盘数据"的泄漏口径(生产策略无此路径)"""
+    def _idx(self, dt):
+        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        return max(0, i)
+
+class LeakyStrategy(DynamicStrategy):
+    SIG_CLASS = LeakySignalSet
+
+def run(R, start, tag, cfg, strat_cls, accrual="pre", exec_lag=0, tw=None, strict=False):
+    c = dict(cfg)
+    ds = strat_cls(R, cfg=c)
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(),
                        start=start, end=None, name=tag, min_delta=0.02, repo=0.022,
                        tranche_weights=tw, cash_bond_rets=bond, cash_bond_pct=cfg.get("cash_bond_pct", 0.0),
-                       exec_lag=exec_lag, accrual_mode=accrual)
+                       exec_lag=exec_lag, accrual_mode=accrual, strict=strict,
+                       rebal_weekday=cfg.get("rebal_weekday", 2), rebal_freq=cfg.get("rebal_freq", "weekly"))
     return evaluate(res)
 
 print("===== 未来函数口径对照 · proxy 全历史 2014-06-23 起 =====")
 MODES = [
-    ("OLD 旧发布口径(含未来函数)", dict(CFG20), "post", 0, 0, [1.0]),
-    ("A0 仅修计提·同日信号",       dict(CFG20), "pre",  0, 0, [1.0]),
-    ("B  前日信号+当日成交(1笔)",   dict(CFG20), "pre",  1, 0, [1.0]),
-    ("C  当日信号+次日成交",        dict(CFG20), "pre",  0, 1, [1.0]),
-    ("D  前日信号+次日成交",        dict(CFG20), "pre",  1, 1, [1.0]),
-    ("v21 前日信号+3周三笔(定稿)",  dict(CFG21), "pre",  1, 0, [1/3]*3),
+    ("OLD 旧发布口径(含未来函数)",  CFG20, LeakyStrategy, "post", 0, [1.0],   False),
+    ("A0  仅修计提·同日信号",       CFG20, LeakyStrategy, "pre",  0, [1.0],   False),
+    ("B   前日信号+当日成交(1笔)",  CFG20, DynamicStrategy, "pre", 0, [1.0],   True),
+    ("C   当日信号+次日成交",       CFG20, LeakyStrategy, "pre",  1, [1.0],   False),
+    ("D   前日信号+次日成交",       CFG20, DynamicStrategy, "pre", 1, [1.0],   False),
+    ("v21 严格(3周三笔)",            CFG21, DynamicStrategy, "pre", 0, [1/3]*3, True),
+    ("v22 严格(周五weekly1笔)",      CFG22, DynamicStrategy, "pre", 0, [1.0],   True),
 ]
 res = {}
-for name, cfg, am, sl, el, tw in MODES:
-    e = run(R, "2014-06-23", "p", cfg, am, sl, el, tw)
+for name, cfg, cls, am, el, tw, st in MODES:
+    e = run(R, "2014-06-23", "p", cfg, cls, am, el, tw, st)
     res[name] = {"proxy": {m: e[m] for m in ["cagr", "max_dd", "sharpe", "calmar", "turnover"]}}
     print(f"  {name:<30} CAGR {e['cagr']*100:6.2f}%  MDD {e['max_dd']*100:6.2f}%  Sharpe {e['sharpe']:.2f}  "
           f"Calmar {e['calmar']:4.2f}  TO {e['turnover']:6.1f}")
 
 print("\n===== 真实窗口 2025-04-23 起 =====")
-for name, cfg, am, sl, el, tw in MODES:
-    e = run(Rr, "2025-04-23", "r", cfg, am, sl, el, tw)
+for name, cfg, cls, am, el, tw, st in MODES:
+    e = run(Rr, "2025-04-23", "r", cfg, cls, am, el, tw, st)
     res[name]["real"] = {m: e[m] for m in ["cagr", "max_dd", "sharpe", "calmar", "turnover"]}
     print(f"  {name:<30} CAGR {e['cagr']*100:6.2f}%  MDD {e['max_dd']*100:6.2f}%  Calmar {e['calmar']:4.2f}")
 
-# 验证旧口径可复现v20发布值
-assert abs(res["OLD 旧发布口径(含未来函数)"]["proxy"]["cagr"] - 0.1620) < 0.005, "OLD proxy 复现失败"
-assert abs(res["OLD 旧发布口径(含未来函数)"]["real"]["cagr"] - 0.2810) < 0.01, "OLD real 复现失败"
-print("\n[ok] 旧口径复现v20发布值 (16.20%/28.10%) 通过")
+old_p = res["OLD 旧发布口径(含未来函数)"]["proxy"]["cagr"]
+old_r = res["OLD 旧发布口径(含未来函数)"]["real"]["cagr"]
+v_p = res["v21 严格(3周三笔)"]["proxy"]["cagr"]
+v_r = res["v21 严格(3周三笔)"]["real"]["cagr"]
+w_p = res["v22 严格(周五weekly1笔)"]["proxy"]["cagr"]
+w_r = res["v22 严格(周五weekly1笔)"]["real"]["cagr"]
+assert abs(old_p - 0.1620) < 0.005, f"旧口径proxy复现失败: {old_p:.4f}"
+assert abs(old_r - 0.2810) < 0.01, f"旧口径real复现失败: {old_r:.4f}"
+assert abs(v_p - 0.1023) < 0.005, f"严格proxy回归失败(v21): {v_p:.4f}"
+assert abs(v_r - 0.2444) < 0.01, f"严格real回归失败(v21): {v_r:.4f}"
+assert abs(w_p - 0.1049) < 0.01, f"严格proxy回归失败(v22): {w_p:.4f}"
+assert abs(w_r - 0.2809) < 0.01, f"严格real回归失败(v22): {w_r:.4f}"
+print("\n[ok] 旧口径复现 v20 发布值(16.20%/28.10%) 通过; 严格口径复现 v21(10.23%/24.44%) 与 v22(10.49%/28.09%) 通过")
 
-print("\n===== 压力测试 (严格口径B vs 旧口径) =====")
+print("\n===== 压力测试 (严格口径 vs 旧口径) =====")
 synth, s_idx = synthetic_resonance(Rr, ("2024-09-02", "2026-07-31"), -0.30, -0.20, -0.25)
 scen = [("2015股灾", R, "2015-06-15", "2016-02-29", None), ("2018熊市", R, "2018-01-02", "2019-01-03", None),
         ("2021-22熊", R, "2021-02-19", "2022-10-31", None), ("2019-21牛", R, "2019-01-04", "2021-02-18", None),
         ("共振熊", synth, "2024-09-02", "2026-07-31", s_idx)]
-print(f"{'情景':<10}{'OLD CAGR/MDD':>20}{'严格B CAGR/MDD':>22}")
+print(f"{'情景':<10}{'OLD CAGR/MDD':>20}{'严格 CAGR/MDD':>22}")
 for name, Rs, ps, pe, am in scen:
-    cfg = dict(CFG20)
-    a = run(Rs, ps, "old", cfg, "post", 0, 0, [1.0])
-    b = run(Rs, ps, "b", cfg, "pre", 1, 0, [1.0])
+    a = run(Rs, ps, "old", CFG20, LeakyStrategy, "post", 0, [1.0], False)
+    b = run(Rs, ps, "b", CFG20, DynamicStrategy, "pre", 0, [1.0], True)
     print(f"{name:<10}{a['cagr']*100:10.2f}%/{a['max_dd']*100:6.2f}%{b['cagr']*100:12.2f}%/{b['max_dd']*100:6.2f}%")
     res.setdefault("stress", {})[name] = {"OLD": [round(a["cagr"], 4), round(a["max_dd"], 4)],
-                                          "B": [round(b["cagr"], 4), round(b["max_dd"], 4)]}
+                                          "严格": [round(b["cagr"], 4), round(b["max_dd"], 4)]}
 
 json.dump(res, open(f"{OUT}/audit_lookahead.json", "w"), ensure_ascii=False, indent=1, default=str)
 print("\n[ok] out/audit_lookahead.json")

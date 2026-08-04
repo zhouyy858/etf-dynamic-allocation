@@ -1,0 +1,138 @@
+{
+ "state_map": {
+  "0": [
+   5,
+   30
+  ],
+  "1": [
+   15,
+   29
+  ],
+  "2": [
+   25,
+   28
+  ],
+  "3": [
+   36,
+   26
+  ],
+  "4": [
+   39,
+   21
+  ],
+  "5": [
+   44,
+   16
+  ],
+  "6": [
+   66,
+   14
+  ],
+  "7": [
+   65,
+   10
+  ],
+  "8": [
+   85,
+   6
+  ],
+  "9": [
+   81,
+   3
+  ]
+ },
+ "market_dd": {
+  "CN": [
+   0.07,
+   0.05,
+   0.18,
+   0.14
+  ],
+  "US": [
+   0.13,
+   0.12,
+   0.24,
+   0.15
+  ]
+ },
+ "dd_eq_cap": [
+  [
+   -0.08,
+   85
+  ],
+  [
+   -0.12,
+   75
+  ],
+  [
+   -0.16,
+   65
+  ],
+  [
+   -0.2,
+   55
+  ]
+ ],
+ "hyst_up": 0.66,
+ "hyst_down": 0.24,
+ "min_cash": 0.03,
+ "max_eq": 0.98,
+ "vol_target": 0.19,
+ "gate_win": 100,
+ "growth_split_bull": {
+  "159952": 0.36,
+  "159941": 0.48,
+  "513500": 0.2
+ },
+ "dd_cap_unconditional": true,
+ "defense_momentum": true,
+ "defense_momentum_win": 80,
+ "defense_momentum_t": 4.0,
+ "defense_clamp": [
+  0.4,
+  0.6
+ ],
+ "premium_gate": true,
+ "premium_thr": [
+  0.05,
+  0.08,
+  0.12
+ ],
+ "premium_cut": [
+  0.6,
+  0.3,
+  0.15
+ ],
+ "corr_risk": true,
+ "corr_risk_win": 40,
+ "corr_risk_thr": [
+  0.3,
+  0.42
+ ],
+ "corr_risk_cut": [
+  0.8,
+  0.6
+ ],
+ "speed_brake": true,
+ "speed_brake_win": 5,
+ "speed_brake_thr": -0.04,
+ "speed_brake_cut": 0.5,
+ "speed_brake_recover": 8,
+ "tranche_weights": [
+  1.0
+ ],
+ "version": "v22",
+ "repo_rate": 0.022,
+ "floor_pct": {
+  "cn": 0.0,
+  "us": 7.5
+ },
+ "_note": "v22(2026-08-04)全参数重训定稿: 1)调仓时间 S阶段45组->周五weekly1笔(proxy Cal1.15与周三持平, real Cal6.19>4.29); 2)底仓 F阶段343组+敏感性->cn=0/us=7.5(平台Cal1.61-1.68, 国内底仓反而拖累Calmar); 3)策略参数 P阶段33维坐标下降3轮+150组随机; 4)风控框架 G阶段15变体全开最优, 成长轮动/剔标证伪; 5)末轮修正(2026-08-04): CN快刹车由10%回7%(v21同档), 修复2015股灾MDD -10.36%->-7.04%与2021-22熊转负, 全历史Calmar 1.68->1.54(代价), OOS(2022-26)1.43与real窗口28.09%不降反升; 6)严格无未来口径: signal_lag=1+accrual=pre+premium_shift=2+strict=True。业绩(2026-07-31): proxy全历史 10.49%/-6.79%/Cal1.54; real窗口 28.09%/-4.26%/Cal6.59; 2015股灾-8.71%/-7.04%、2018熊+4.39%/-5.14%、2021-22熊-0.02%/-7.42%、共振熊-2.06%/-7.24%, 全部情景MDD<10%。v21对比: proxy Cal1.06->1.54(+45%), real Cal4.58->6.59(+44%), real CAGR 24.44%->28.09%。诚实边界: 年化20%+仅real窗口成立; 全历史约10.5%。",
+ "cash_bond_pct": 0.5,
+ "cash_bond_code": "511010",
+ "signal_lag": 1,
+ "premium_shift": 2,
+ "score_confirm_weeks": 2,
+ "rebal_weekday": 4,
+ "rebal_freq": "weekly"
+}

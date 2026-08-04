@@ -46,7 +46,7 @@ DD_EQ_CAP = [(-0.12, 80), (-0.18, 65), (-0.25, 50)]
 HYST_UP, HYST_DOWN = 0.54, 0.17
 
 class SignalSet:
-    def __init__(self, R, a_mkt_override=None, lag=0):
+    def __init__(self, R, a_mkt_override=None, lag=0, gate_win=120):
         if a_mkt_override is not None:
             hs300 = a_mkt_override
         else:
@@ -60,13 +60,18 @@ class SignalSet:
         self.u_m = lvl["513500"].reindex(R.index).ffill()
         self.R = R
         self.lag = int(lag)  # 信号时点: 0=当日收盘, 1=前一日收盘(严格无未来, 实盘T日尾盘用T-1信号)
+        self.gate_win = int(gate_win)
         self.sma = {}
+        _win = sorted(set((20, 60, 120, self.gate_win)))
         for nm, x in [("a_mkt", self.a_mkt), ("a_g", self.a_g), ("u_g", self.u_g), ("u_m", self.u_m)]:
-            self.sma[nm] = {w: x.rolling(w, min_periods=10).mean() for w in (20, 60, 120)}
+            self.sma[nm] = {w: x.rolling(w, min_periods=10).mean() for w in _win}
 
     def _idx(self, dt):
+        # 结构防线(不可配置): 信号最小滞后1个交易日 —— 决策日当天收盘数据在盘中不可得,
+        # 即使误配 lag=0 也无法读取当日数据; 审计脚本用"数据平移法"(R.shift(-1))模拟旧版
+        # 泄漏口径做历史对照, 生产策略代码本身不存在泄漏路径
         i = self.R.index.get_indexer([dt], method="ffill")[0]
-        return max(0, i - self.lag)
+        return max(0, i - max(1, int(self.lag)))
 
     def score(self, dt):
         i = self._idx(dt)
@@ -94,8 +99,12 @@ class SignalSet:
         return dd, bool(px > s20), bool(s20 > s60), rec, bool(px > sg)
 
 class DynamicStrategy:
+    SIG_CLASS = SignalSet  # 审计脚本可用子类注入"泄漏口径"信号集(仅审计对照, 生产代码无泄漏路径)
+
     def __init__(self, R_full, cfg=None, a_mkt_override=None):
-        self.sig = SignalSet(R_full, a_mkt_override=a_mkt_override, lag=cfg.get("signal_lag", 0) if cfg else 0)
+        self.sig = self.SIG_CLASS(R_full, a_mkt_override=a_mkt_override,
+                                  lag=cfg.get("signal_lag", 1) if cfg else 1,
+                                  gate_win=cfg.get("gate_win", 120) if cfg else 120)
         self.R = R_full
         cfg = cfg or {}
         sm = cfg.get("state_map", STATE_MAP)
@@ -155,7 +164,22 @@ class DynamicStrategy:
         cn_f, us_f = float(fp["cn"]), float(fp["us"])
         self.floor = {"159232": cn_f / 2.0, "515100": cn_f / 2.0,
                       "159941": us_f / 2.0, "513500": us_f / 2.0, "159952": 0.0}
+        self.exclude = set(cfg.get("exclude", []))
+        for s in self.exclude:
+            self.floor[s] = 0.0
+        cn_f = sum(self.floor[s] for s in ["159232", "515100"])
+        us_f = sum(self.floor[s] for s in ["159941", "513500"])
         self.floor_eq = cn_f + us_f
+        # 成长拆分剔除被排除标的并归一化
+        for nm in ("growth_split_bull", "growth_split_bear"):
+            d = {k: v for k, v in getattr(self, nm).items() if k not in self.exclude}
+            tot = sum(d.values())
+            if tot > 0:
+                d = {k: v / tot for k, v in d.items()}
+            setattr(self, nm, d)
+        ds = {k: v for k, v in DEFENSE_SPLIT.items() if k not in self.exclude}
+        tot = sum(ds.values())
+        self.defense_split_base = {k: v / tot for k, v in ds.items()} if tot > 0 else {}
         self._lock = {"CN": False, "US": False}
         self.state_log = []
         self.risk_log = []
@@ -197,7 +221,7 @@ class DynamicStrategy:
         i = self.sig._idx(dt)
         if i < self.growth_rotation_win or i >= len(self.R):
             return base
-        codes = ["159952", "159941", "513500"]
+        codes = [c for c in ["159952", "159941", "513500"] if c not in self.exclude]
         seg = self.R.iloc[i - self.growth_rotation_win + 1: i + 1]
         lvl = {c: float((1 + seg[c].fillna(0.0)).prod()) for c in codes}
         strengths = {}
@@ -268,7 +292,7 @@ class DynamicStrategy:
     def _defense_split(self, dt):
         """国内防御双持轮动: 159232(自由现金流) vs 515100(红利低波100) 按相对动量分配防御弹性"""
         if not self.defense_momentum:
-            return dict(DEFENSE_SPLIT)
+            return dict(self.defense_split_base)
         i = self.sig._idx(dt)
         if i < self.defense_momentum_win or i >= len(self.R):
             return dict(DEFENSE_SPLIT)
@@ -296,6 +320,8 @@ class DynamicStrategy:
     def _us_split(self, dt):
         """海外腿内部轮动: 纳指(159941) vs 标普(513500) 按相对动量分配海外成长弹性"""
         if not self.us_rotation:
+            return None
+        if "159941" in self.exclude or "513500" in self.exclude:
             return None
         r = self._momentum_ratio(dt, "159941", "513500")
         if r is None:
@@ -420,10 +446,13 @@ class DynamicStrategy:
 
     def _base_target(self, dt, sc):
         g, d = self.state_map.get(sc, self.state_map[min(max(sc, 0), 9)])
-        split_g = self.growth_split_bull if g >= 30 else self.growth_split_bear
+        split_g = dict(self.growth_split_bull if g >= 30 else self.growth_split_bear)
         split_d = self._defense_split(dt)
+        for s in self.exclude:
+            split_g.setdefault(s, 0.0)
+            split_d.setdefault(s, 0.0)
         if self.growth_rotation:
-            split_g = self._growth_split(dt, {"159952": split_g["159952"], "159941": split_g["159941"], "513500": split_g["513500"]})
+            split_g = self._growth_split(dt, {s: split_g.get(s, 0.0) for s in ("159952", "159941", "513500")})
         us_split = self._us_split(dt)
         vg_us = self._valuation_gate(dt, "US")
         vg_cn = self._valuation_gate(dt, "CN")
@@ -460,6 +489,8 @@ class DynamicStrategy:
             out["513500"] = self.floor["513500"] + (out["513500"] - self.floor["513500"]) * m_us_g * m_us_all * vg_us * prem_cut * corr_cut
             if prem_freed > 0:
                 out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut + prem_freed * m_cn_g * m_cn_all
+        for s in self.exclude:
+            out[s] = 0.0
         return out
 
     def regular_target(self, dt, ctx):

@@ -66,7 +66,9 @@ def run_all(R, label, start, end, dyn_cfg):
                        start=start, end=end, name=f"DYN {label}",
                        min_delta=dyn_cfg.get("min_delta", 0.02), repo=dyn_cfg.get("repo_rate", 0.022),
                        tranche_weights=dyn_cfg.get("tranche_weights"),
-                       cash_bond_rets=bond, cash_bond_pct=dyn_cfg.get("cash_bond_pct", 0.0))
+                       cash_bond_rets=bond, cash_bond_pct=dyn_cfg.get("cash_bond_pct", 0.0),
+                       rebal_weekday=dyn_cfg.get("rebal_weekday", 2), rebal_freq=dyn_cfg.get("rebal_freq", "weekly"),
+                       strict=True)
     results[f"DYN {label}"] = evaluate(res, periods=PERIODS)
     wealths[f"DYN {label}"] = res["wealth"]
     results["_weights"] = res["weights"]
@@ -165,10 +167,12 @@ def term_bars(rows, title, width=42):
 
 # ---------- 主流程 ----------
 def main():
-    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v21.json")
-    tag = sys.argv[2] if len(sys.argv) > 2 else "v21"
+    cfg_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "final_cfg_v22.json")
+    tag = sys.argv[2] if len(sys.argv) > 2 else "v22"
     cfg = json.load(open(cfg_file))
-    print(f"===== 迭代 {tag} | 每周三决策(前一日信号, 无未来函数)、目标分3周三笔(每周三1/3)、三周调整完 =====")
+    wd = cfg.get("rebal_weekday", 2); wd_cn = "一二三四五"[wd]
+    freq = cfg.get("rebal_freq", "weekly"); n_tw = len(cfg.get("tranche_weights", [1.0]))
+    print(f"===== 迭代 {tag} | 周{wd_cn}-{freq}-{n_tw}笔(前一日信号, 无未来函数, strict) =====")
     rp = run_all(R_PROXY, tag, BACKTEST_START, None, cfg)
     rr = run_all(R_REAL, tag, REAL_START, None, cfg)
     json.dump({k: v for k, v in rp.items() if not k.startswith("_")},
@@ -209,7 +213,7 @@ def main():
     ds_live = DynamicStrategy(R_PROXY, cfg=dict(cfg, signal_lag=0))
     # 实盘口径: 最新数据日=T-1, 以lag=0实例在T-1数据上计算"下一个周三目标"(等价于周三早盘决策)
     tgt_last = ds_live.regular_target(wdf.index[-1], {"pf_rets": rets})
-    print("  目标权重(下一个周三决策目标, 用最新可得数据):")
+    print(f"  目标权重(下一个周{wd_cn}决策目标, 用最新可得数据):")
     for s in SLOTS + ["cash"]:
         nm = ETF_NAMES.get(s, "现金(国债逆回购)")
         print(f"    {s:<8} {nm:<12} {tgt_last[s]*100:6.2f}%")

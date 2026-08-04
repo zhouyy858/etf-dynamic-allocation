@@ -11,7 +11,7 @@ from engine import run_backtest
 from strategy import DynamicStrategy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v21.json")
+CFG_FILE = os.path.join(HERE, "..", "references", "final_cfg_v22.json")
 NAMES = {"159232": "自由现金流", "515100": "红利低波100", "159941": "纳指100",
          "513500": "标普500", "159952": "创业板"}
 SLOTS = ["159232", "515100", "159941", "513500", "159952"]
@@ -40,7 +40,8 @@ def main():
     bond = rets_from(read_table("511010_nav.csv"), "cum_nav") if cfg.get("cash_bond_pct") else None
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(), start="2014-06-23", min_delta=0.02, repo=cfg.get("repo_rate", 0.022),
                        tranche_weights=cfg.get("tranche_weights"),
-                       cash_bond_rets=bond, cash_bond_pct=cfg.get("cash_bond_pct", 0.0))
+                       cash_bond_rets=bond, cash_bond_pct=cfg.get("cash_bond_pct", 0.0),
+                       rebal_weekday=cfg.get("rebal_weekday", 2), rebal_freq=cfg.get("rebal_freq", "weekly"), strict=True)
     wdf, rets = res["weights"], res["rets"]
     wealth = (1 + rets).cumprod()
     last = wdf.index[-1]
@@ -67,12 +68,13 @@ def main():
         lines.append(f"| {s} {NAMES[s]} | {pct(w_act[s])} | {pct(tgt[s])} | {pct(w_act[s] - tgt[s])} |")
     lines.append(f"| 现金(逆回购) | {pct(w_act['cash'])} | {pct(tgt['cash'])} | {pct(w_act['cash'] - tgt['cash'])} |")
     lines.append("")
-    is_wed = today.weekday() == 2
+    rebal_wd = int(cfg.get("rebal_weekday", 2))
+    is_rebal_day = today.weekday() == rebal_wd
     gap = max(abs(w_act[s] - tgt[s]) for s in SLOTS + ["cash"])
-    if is_wed:
-        action = "今日是周三调仓日：按 v21 规则用前一日(T-1)收盘信号决策，目标缺口分 3 笔（今日收盘成交 1/3，随后 2 个周三各 1/3）；QDII 溢价用 T-2 口径（>3% 注意、>5% 买入暂缓），下单前查 IOPV"
+    if is_rebal_day:
+        action = f"今日是周{WEEKDAY_CN[rebal_wd][1]}调仓日：按 v22 规则用前一日(T-1)收盘信号决策，目标缺口 1 笔当日收盘成交；QDII 溢价用 T-2 口径（>3% 注意、>5% 买入暂缓），下单前查 IOPV"
     elif gap > 0.02:
-        action = f"非调仓日，仓位与目标基本一致（最大偏差 {pct(gap)}），等待下一个周三检查"
+        action = f"非调仓日，仓位与目标基本一致（最大偏差 {pct(gap)}），等待下一个周{WEEKDAY_CN[rebal_wd][1]}检查"
     else:
         action = "非调仓日，仓位与目标基本一致，仅观察"
     # ---- QDII 溢价监控 (场内价/单位净值-1) ----

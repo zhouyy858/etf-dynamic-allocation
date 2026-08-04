@@ -16,10 +16,16 @@ SLOTS = ["159232", "515100", "159941", "513500", "159952"]
 def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weights=None,
                  start=None, end=None, tranches=TRANCHES, fee=FEE, repo=REPO,
                  min_delta=0.002, name="", tranche_weights=None,
-                 cash_bond_rets=None, cash_bond_pct=0.0, exec_lag=0, accrual_mode="pre"):
+                 cash_bond_rets=None, cash_bond_pct=0.0, exec_lag=0, accrual_mode="pre",
+                 rebal_weekday=2, rebal_freq="weekly", strict=False):
+    if strict:
+        assert accrual_mode == "pre", "严格模式必须 accrual_mode=pre (成交仓位不得计提当日收益)"
+        assert exec_lag == 0, "严格模式必须 exec_lag=0 (决策日收盘成交, 前一日信号)";
     """accrual_mode: "pre"=先按交易前权重计提当日收益再收盘成交(严格无未来, 新买入份额自下一
     交易日起计收益); "post"=复现旧版行为(成交后按当日收益计提, 仅供审计对照, 勿用于实盘口径)
     exec_lag: 成交时点 0=决策当日收盘成交(严格口径: 先计提当日收益再成交); 1=决策次日收盘成交
+    rebal_weekday: 常规调仓日 0=周一..4=周五 (默认2=周三)
+    rebal_freq: "weekly"(每周) / "biweekly"(隔周) / "monthly"(每月首个调仓日)
     tranche_weights: 分笔比例列表(如[1.0]立即执行、[0.5,0.5]、[1/3]*3), 默认None=等分tranches笔
     cash_bond_pct: 闲置现金中配置债券ETF的比例(0~1); cash_bond_rets: 债券ETF日收益序列(如511010),
     缺失日按逆回购repo计息 -> 现金层 = (1-pct)*逆回购 + pct*债券ETF"""
@@ -58,9 +64,16 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
     turnover_day = np.zeros(n)
     pending = {}
 
-    def next_wed(i):
+    def freq_ok(d):
+        if rebal_freq == "biweekly":
+            return d.isocalendar().week % 2 == 0
+        if rebal_freq == "monthly":
+            return d.day <= 7
+        return True
+
+    def next_rebal(i):
         j = i + 1
-        while j < n and dates[j].weekday() != 2:
+        while j < n and not (dates[j].weekday() == rebal_weekday and freq_ok(dates[j])):
             j += 1
         return j if j < n else None
 
@@ -98,8 +111,8 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
                 w = w + delta
                 fee_today += float(np.abs(delta).sum())
         scheduled = sum(len(v) for v in pending.values())
-        # 决策: 首日建仓/每周三常规调仓/日度紧急刹车 (信号用截至前一日数据, 无未来函数)
-        is_rebal = (i == 0) or (dt.weekday() == 2)
+        # 决策: 首日建仓/常规调仓日/日度紧急刹车 (信号用截至前一日数据, 无未来函数)
+        is_rebal = (i == 0) or (dt.weekday() == rebal_weekday and freq_ok(dt))
         target = None
         if is_rebal:
             if fixed_weights is not None:
@@ -138,7 +151,7 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
                         pending.setdefault(ex, []).append(d0)
                     j = ex if ex < n else i
                 for t in range(1, len(tw)):
-                    j = next_wed(j)
+                    j = next_rebal(j)
                     if j is None:
                         break
                     pending.setdefault(j, []).append(delta * tw[t])

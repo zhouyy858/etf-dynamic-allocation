@@ -20,6 +20,8 @@ CFG14 = json.load(open(f"{SKILL_REF}/final_cfg_v15.json"))
 CFG17 = json.load(open(f"{SKILL_REF}/final_cfg_v17.json"))
 CFG18 = json.load(open(f"{SKILL_REF}/final_cfg_v18.json"))
 CFG20 = json.load(open(f"{SKILL_REF}/final_cfg_v20.json"))
+CFG21 = json.load(open(f"{SKILL_REF}/final_cfg_v21.json"))
+CFG22 = json.load(open(f"{SKILL_REF}/final_cfg_v22.json")) if os.path.exists(f"{SKILL_REF}/final_cfg_v22.json") else None
 REPO = 0.022
 
 BENCHMARKS = {
@@ -66,14 +68,17 @@ def synthetic_resonance(R, window, us_target, cn_target, idx_target):
           f"k_cn={k_cn:.3f}(累计{(1+k_cn*cn_avg).prod()-1:+.2%}) k_idx={k_idx:.3f}(累计{(1+k_idx*idx_w).prod()-1:+.2%})")
     return synth, s_idx
 
-def run_scenario(name, ps, pe, R, a_mkt=None, dyn_cfg=None, min_delta=0.002, label="DYN", repo=0.018, tweights=None):
+def run_scenario(name, ps, pe, R, a_mkt=None, dyn_cfg=None, min_delta=0.002, label="DYN", repo=0.018, tweights=None, strict=False):
     ds = DynamicStrategy(R, cfg=dyn_cfg, a_mkt_override=a_mkt)
     bond = None
     if dyn_cfg and dyn_cfg.get("cash_bond_pct"):
         bond = rets_from(read_table("511010_nav.csv"), "cum_nav")
     res = run_backtest(R, target_weights_fn=ds.target_fn(), daily_override_fn=ds.daily_fn(),
                        start=ps, end=pe, name=label, min_delta=min_delta, repo=repo, tranche_weights=tweights,
-                       cash_bond_rets=bond, cash_bond_pct=dyn_cfg.get("cash_bond_pct", 0.0) if dyn_cfg else 0.0)
+                       cash_bond_rets=bond, cash_bond_pct=dyn_cfg.get("cash_bond_pct", 0.0) if dyn_cfg else 0.0,
+                       rebal_weekday=dyn_cfg.get("rebal_weekday", 2) if dyn_cfg else 2,
+                       rebal_freq=dyn_cfg.get("rebal_freq", "weekly") if dyn_cfg else "weekly",
+                       strict=strict)
     rows = {label: evaluate(res)}
     for bname, bw in BENCHMARKS.items():
         rb = run_backtest(R, fixed_weights=bw, start=ps, end=pe, name=bname, min_delta=0.0002)
@@ -103,6 +108,8 @@ def main():
         r17 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG17, min_delta=0.02, label="DYN v17", repo=REPO, tweights=CFG17.get("tranche_weights"))
         r18 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG18, min_delta=0.02, label="DYN v18", repo=REPO, tweights=CFG18.get("tranche_weights"))
         r20 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG20, min_delta=0.02, label="DYN v20", repo=REPO, tweights=CFG20.get("tranche_weights"))
+        r21 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG21, min_delta=0.02, label="DYN v21", repo=REPO, tweights=CFG21.get("tranche_weights"), strict=True)
+        r22 = run_scenario(name, ps, pe, Rs, a_mkt=am, dyn_cfg=CFG22, min_delta=0.02, label="DYN v22", repo=REPO, tweights=CFG22.get("tranche_weights"), strict=True) if CFG22 else None
         merged = {}
         for k, e in r10.items():
             merged[k] = e
@@ -114,12 +121,19 @@ def main():
             merged[k] = e  # 新增 DYN v18 主行
         for k, e in r20.items():
             merged[k] = e  # 新增 DYN v20 主行
+        for k, e in r21.items():
+            merged[k] = e
+        if r22:
+            for k, e in r22.items():
+                merged[k] = e
         results[name] = merged
-        for k in ["DYN v10", "DYN v15", "DYN v17", "DYN v18", "DYN v20"] + list(BENCHMARKS.keys()):
+        for k in ["DYN v10", "DYN v15", "DYN v17", "DYN v18", "DYN v20", "DYN v21", "DYN v22"] + list(BENCHMARKS.keys()):
             if k in merged:
                 e = merged[k]
                 print(f"  {k:<18} CAGR={e['cagr']*100:7.2f}%  MDD={e['max_dd']*100:6.2f}%  "
                       f"Sharpe={e['sharpe']:.2f}  Calmar={e['calmar']:.2f}  total={e['total_ret']*100:8.2f}%")
+                if k in ("DYN v22", "DYN v21") and e.get('turnover'):
+                    print(f"  {'':<18} TO={e['turnover']:.0f}%  avg_cash={e['avg_cash']*100:.0f}%")
             else:
                 e = merged.get("v15_" + k)
                 if e:

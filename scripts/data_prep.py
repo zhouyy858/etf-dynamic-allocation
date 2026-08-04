@@ -57,7 +57,8 @@ def build_panel(layer="real", start=None, end=None):
     if start: R = R[R.index >= start]
     if end: R = R[R.index <= end]
     W = (1 + R).cumprod()
-    W = W / W.iloc[0]
+    # 每列用首个有效值归一化(避免某资产上市晚于面板起点时首行NaN导致整列NaN)
+    W = W.div(W.bfill().iloc[0].replace(0, 1.0), axis=1)
     return R, W
 
 def panel_info(R):

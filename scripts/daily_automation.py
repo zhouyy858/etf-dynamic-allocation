@@ -93,7 +93,7 @@ def update_readme_positions(sec, logmsg):
         logmsg("[readme] README 缺少 POSITIONS 标记, 跳过自动更新")
         return False
     date_str = sec.get("date", "") or ""
-    t = [f"> 数据截至 **{date_str}**（净值口径）｜ v25 定稿｜ 本段由每日自动化在数据刷新后更新并推送", "",
+    t = [f"> 数据截至 **{date_str}**（净值口径）｜ v26 定稿｜ 本段由每日自动化在数据刷新后更新并推送", "",
          "| 标的 | 实际持仓 | 目标（下周五决策） |", "|---|---|---|"]
     for name, act, tgt in sec["rows"]:
         t.append(f"| {name} | {act} | {tgt} |")

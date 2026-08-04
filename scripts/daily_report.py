@@ -114,7 +114,7 @@ def main():
     lines.append(f"- 上一交易日: {pct(last_ret, 2)} ｜ 近5日: {pct(r5, 2)} ｜ 近20日: {pct(r20, 2)}")
     lines.append(f"- 今年以来: {pct(ytd, 2) if ytd == ytd else 'n/a'} ｜ 当前距历史高点: {pct(cur_dd, 2)}")
     lines.append("")
-    lines.append("> 生成: ETF动态配置skill v21（每周三前日信号决策+3周三笔+溢价T-2门控+相关性风控+速度刹车+逆回购2.2%+国债ETF5成）｜ 无未来函数口径｜ 仅供参考，非投资建议")
+    lines.append("> 生成: ETF动态配置skill v22（周五前日信号决策+1笔当日成交+溢价T-2门控+相关性风控+速度刹车+逆回购2.2%+国债ETF5成+v22全参数重训）｜ 无未来函数口径｜ 仅供参考，非投资建议")
     text = "\n".join(lines)
     print(text)
     if out_path:

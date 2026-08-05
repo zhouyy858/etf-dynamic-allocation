@@ -16,8 +16,8 @@ STATE = os.path.join(WORK, "state.json")
 for d in (DATA_DIR, REPORT_DIR, LOG_DIR):
     os.makedirs(d, exist_ok=True)
 
-def run(cmd, cwd=None, env=None):
-    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=1800)
+def run(cmd, cwd=None, env=None, timeout=1800):
+    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
     return r.returncode, (r.stdout or "")[-1500:], (r.stderr or "")[-1500:]
 
 def notify(title, subtitle, body=""):

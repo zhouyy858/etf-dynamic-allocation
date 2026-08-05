@@ -242,6 +242,9 @@ class DynamicStrategy:
         self.hh_win = int(cfg.get("hh_win", 20))
         self.hh_thr = float(cfg.get("hh_thr", 0.08))
         self.hh_cut = float(cfg.get("hh_cut", 0.5))
+        self.cool_off_weeks = int(cfg.get("cool_off_weeks", 0))
+        self._cool_from = {}
+        self._prev_target = {}
         self.speed_brake = bool(cfg.get("speed_brake", False))
         self.speed_brake_win = int(cfg.get("speed_brake_win", 5))
         self.speed_brake_thr = float(cfg.get("speed_brake_thr", -0.04))
@@ -727,6 +730,21 @@ class DynamicStrategy:
         if scale < 1.0:
             for s in SLOTS:
                 out[s] = self.floor[s] + (out[s] - self.floor[s]) * scale
+        if self.cool_off_weeks > 0:
+            i = self.sig._idx(dt)
+            dti = self.R.index[i] if i < len(self.R) else dt
+            for s in SLOTS:
+                cf = self._cool_from.get(s)
+                if cf is not None:
+                    if (dti - cf).days >= self.cool_off_weeks * 7:
+                        self._cool_from.pop(s, None)
+                    else:
+                        out[s] = self.floor[s]
+            for s in SLOTS:
+                prev = self._prev_target.get(s, self.floor[s])
+                if prev > self.floor[s] + 1e-6 and out[s] <= self.floor[s] + 1e-6:
+                    self._cool_from.setdefault(s, dti)
+            self._prev_target = dict(out)
         if self.regime_gate and self._regime_pct is not None:
             i = self.sig._idx(dt)
             if i >= 0 and not np.isnan(self._regime_pct.iloc[i]):

@@ -90,7 +90,7 @@ v15 相对 v14 改进：新增 **下跌速度刹车**（组合 5 日滚动收益
 
 1. **资料获取**：确认数据最新日（`assets/data/panel_proxy_rets.csv` / `panel_real_rets.csv`）；数据过期时运行 `scripts/fetch_*.py` 刷新。
 2. **数据分析**：统计各标的收益率/波动率/最大回撤/相关性/滚动夏普；校验跨市场相关性（A股/美股）与极端行情传导。
-3. **组合构建**：默认使用 `references/final_cfg_v28.json`（无未来函数口径：`signal_lag:1`、`accrual_mode=pre`、`premium_shift:2`、`strict=True`、周五 1 笔当日收盘成交）；如需优化用 `scripts/search.py`/`scripts/search_v22.py` 做参数搜索（评分：全历史 Calmar 优先，约束真实窗口 CAGR>=20% 且 MDD>=-10%）；参数变更必须通过 `scripts/audit_lookahead.py` 时序口径校验。
+3. **组合构建**：默认使用 `references/final_cfg_v29.json`（无未来函数口径：`signal_lag:1`、`accrual_mode=pre`、`premium_shift:2`、`strict=True`、周五 1 笔当日收盘成交）；如需优化用 `scripts/search.py`/`scripts/search_v22.py` 做参数搜索（评分：全历史 Calmar 优先，约束真实窗口 CAGR>=20% 且 MDD>=-10%）；参数变更必须通过 `scripts/audit_lookahead.py` 时序口径校验。
 4. **历史回测**：`scripts/run_backtest.py`（默认 v21：周三前日信号决策→3 周三笔、费用与逆回购+国债 ETF 计入）；输出 DYN 与 B1-B7 静态基准对比 + 分阶段表现 + 仓位现状 + 终端 ASCII 图表。
 5. **压力测试**：`scripts/stress_test.py` 三情景（牛市/震荡/熊市）+ 跨市场相关性校验。
 6. **严格自我评审**：逐条批判收益漏洞、最大回撤隐患、风格冲突、调仓缺陷、假设风险；生成待优化清单。
@@ -144,6 +144,6 @@ $PY /path/to/skill/scripts/search.py 120 23
 ## 参考文件
 
 - `references/investment_manual.md`：完整投资手册（权重表/触发阈值/分笔细则/牛熊切换/止盈/逆回购/QDII 对策/压力测试/残余风险）。
-- `references/final_cfg_v28.json`：定稿参数（无未来函数口径，run_backtest/日报默认加载；v27 及更早为历史档案）。
+- `references/final_cfg_v29.json`：定稿参数（无未来函数口径，run_backtest/日报默认加载；v28 及更早为历史档案）。
 - `references/iterations.json`：v10→v27 迭代进展（含 v21 未来函数修正对照）；`references/stress_test.json`：三情景压力测试 + 合成共振熊市；`references/risk_analysis.json`：相关性/极端窗口；`out/audit_lookahead.json`：时序口径对照结果。
 - `assets/data/`：回测数据面板（代理 2014 起 + 真实 2025-04 起）。

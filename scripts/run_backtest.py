@@ -168,10 +168,10 @@ def term_bars(rows, title, width=42):
 # ---------- 主流程 ----------
 def main():
     _here = os.path.dirname(os.path.abspath(__file__))
-    _p1 = os.path.join(_here, "..", "references", "final_cfg_v28.json")
-    _p2 = os.path.join(_here, "references", "final_cfg_v28.json")
+    _p1 = os.path.join(_here, "..", "references", "final_cfg_v29.json")
+    _p2 = os.path.join(_here, "references", "final_cfg_v29.json")
     cfg_file = sys.argv[1] if len(sys.argv) > 1 else (_p1 if os.path.exists(_p1) else _p2)
-    tag = sys.argv[2] if len(sys.argv) > 2 else "v28"
+    tag = sys.argv[2] if len(sys.argv) > 2 else "v29"
     cfg = json.load(open(cfg_file))
     wd = cfg.get("rebal_weekday", 2); wd_cn = "一二三四五"[wd]
     freq = cfg.get("rebal_freq", "weekly"); n_tw = len(cfg.get("tranche_weights", [1.0]))

@@ -48,8 +48,8 @@ def main():
     nav_last = nav_last_date()
     today = pd.Timestamp.now().normalize()
     w_act = wdf.iloc[-1]
-    # 实盘目标: 最新数据日=T-1收盘; 用signal_lag=0实例在T-1数据上计算"下一个周三决策目标"
-    # (等价于周三早盘用前一日数据决策; 历史统计段仍用cfg内signal_lag=1的严格口径)
+    # 实盘目标: 最新数据日=T-1收盘; 用signal_lag=0实例在T-1数据上计算"下一个周五决策目标"
+    # (等价于周五早盘用前一日数据决策; 历史统计段仍用cfg内signal_lag=1的严格口径)
     ds_live = DynamicStrategy(R, cfg=dict(cfg, signal_lag=0))
     tgt = ds_live.regular_target(last, {"pf_rets": rets})
     sc = ds.state_log[-1][1] if ds.state_log else 0
@@ -72,7 +72,7 @@ def main():
     is_rebal_day = today.weekday() == rebal_wd
     gap = max(abs(w_act[s] - tgt[s]) for s in SLOTS + ["cash"])
     if is_rebal_day:
-        action = f"今日是周{WEEKDAY_CN[rebal_wd][1]}调仓日：按 v29 规则用前一日(T-1)收盘信号决策，目标缺口 1 笔当日收盘成交；QDII 溢价用 T-2 口径（>3% 注意、>5% 买入暂缓），下单前查 IOPV"
+        action = f"今日是周{WEEKDAY_CN[rebal_wd][1]}调仓日：按 v29 规则用前一日(T-1)收盘信号决策，目标缺口 1 笔当日收盘成交；QDII 溢价用 T-2 口径（绝对溢价>5/8/12% 自动降仓×0.45/×0.22/×0.08；相对溢价差>2pp 转投低溢价品种），下单前查 IOPV"
     elif gap > 0.02:
         action = f"非调仓日，仓位与目标基本一致（最大偏差 {pct(gap)}），等待下一个周{WEEKDAY_CN[rebal_wd][1]}检查"
     else:

@@ -204,7 +204,7 @@ def main():
     head = out.strip().splitlines()
     score_line = next((l for l in head if "有效打分" in l), "")
     cash_line = next((l for l in head if l.startswith("| 现金")), "")
-    act_line = next((l for l in head if l.startswith("非调仓") or l.startswith("今日是周三")), "")
+    act_line = next((l for l in head if l.startswith("非调仓") or l.startswith("今日是周")), "")
     sub = f"{score_line.split('｜')[0] if '｜' in score_line else score_line}"
     sub += f" ｜ {cash_line.split('|')[2] if len(cash_line.split('|'))>2 else ''}现金"
     notify("ETF策略日报", sub.strip(" ｜"), act_line[:120])

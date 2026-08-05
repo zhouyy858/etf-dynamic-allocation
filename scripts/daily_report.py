@@ -11,7 +11,7 @@ from engine import run_backtest
 from strategy import DynamicStrategy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG_FILE = (os.path.join(HERE, "..", "references", "final_cfg_v29.json") if os.path.exists(os.path.join(HERE, "..", "references", "final_cfg_v29.json")) else os.path.join(HERE, "references", "final_cfg_v29.json"))
+CFG_FILE = (os.path.join(HERE, "..", "references", "final_cfg_v30.json") if os.path.exists(os.path.join(HERE, "..", "references", "final_cfg_v30.json")) else os.path.join(HERE, "references", "final_cfg_v30.json"))
 NAMES = {"159232": "自由现金流", "515100": "红利低波100", "159941": "纳指100",
          "513500": "标普500", "159952": "创业板"}
 SLOTS = ["159232", "515100", "159941", "513500", "159952"]
@@ -72,7 +72,7 @@ def main():
     is_rebal_day = today.weekday() == rebal_wd
     gap = max(abs(w_act[s] - tgt[s]) for s in SLOTS + ["cash"])
     if is_rebal_day:
-        action = f"今日是周{WEEKDAY_CN[rebal_wd][1]}调仓日：按 v29 规则用前一日(T-1)收盘信号决策，目标缺口 1 笔当日收盘成交；QDII 溢价用 T-2 口径（绝对溢价>5/8/12% 自动降仓×0.45/×0.22/×0.08；相对溢价差>2pp 转投低溢价品种），下单前查 IOPV"
+        action = f"今日是周{WEEKDAY_CN[rebal_wd][1]}调仓日：按 v30 规则用前一日(T-1)收盘信号决策，目标缺口 1 笔当日收盘成交；QDII 溢价用 T-2 口径（绝对溢价>5/8/12% 自动降仓×0.45/×0.22/×0.08；相对溢价差>2pp 转投低溢价品种），下单前查 IOPV"
     elif gap > 0.02:
         action = f"非调仓日，仓位与目标基本一致（最大偏差 {pct(gap)}），等待下一个周{WEEKDAY_CN[rebal_wd][1]}检查"
     else:
@@ -114,7 +114,7 @@ def main():
     lines.append(f"- 上一交易日: {pct(last_ret, 2)} ｜ 近5日: {pct(r5, 2)} ｜ 近20日: {pct(r20, 2)}")
     lines.append(f"- 今年以来: {pct(ytd, 2) if ytd == ytd else 'n/a'} ｜ 当前距历史高点: {pct(cur_dd, 2)}")
     lines.append("")
-    lines.append("> 生成: ETF动态配置skill v29（周五前日信号决策+1笔当日成交+溢价T-2门控+相对溢价倾斜+溢价门控削减增强+相关性风控+速度刹车(恢复期12日)+逆回购2.2%+国债ETF 511010七成半+前提驱动+AI超配v29定稿）｜ 无未来函数口径｜ 仅供参考，非投资建议")
+    lines.append("> 生成: ETF动态配置skill v30（周五前日信号决策+1笔当日成交+溢价T-2门控+相对溢价倾斜+溢价门控削减增强+相关性风控+速度刹车(恢复期12日)+逆回购2.2%+国债ETF 511010七成半+前提驱动+中间态v30定稿:底仓2+10/创业板30/纳指63）｜ 无未来函数口径｜ 仅供参考，非投资建议")
     text = "\n".join(lines)
     print(text)
     if out_path:

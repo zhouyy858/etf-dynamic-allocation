@@ -255,6 +255,11 @@ class DynamicStrategy:
         self.speed_brake_thr = float(cfg.get("speed_brake_thr", -0.04))
         self.speed_brake_cut = float(cfg.get("speed_brake_cut", 0.6))
         self.speed_brake_recover = int(cfg.get("speed_brake_recover", 8))
+        self.speed_brake_dd_thr = float(cfg.get("speed_brake_dd_thr", -0.03))
+        self.speed_brake_mkt = bool(cfg.get("speed_brake_mkt", False))  # 分市场速度刹车(仅砍下跌市场, 0=关闭)
+        self.speed_brake_mkt_thr = float(cfg.get("speed_brake_mkt_thr", -0.04))
+        self.speed_brake_mkt_cut = float(cfg.get("speed_brake_mkt_cut", 0.5))
+        self._sb_mkt_on = {}
         self._speed_brake_on = 0
         self.growth_rotation = bool(cfg.get("growth_rotation", False))
         self.growth_rotation_win = int(cfg.get("growth_rotation_win", 60))
@@ -543,10 +548,23 @@ class DynamicStrategy:
                                 mod = True
                     if mod:
                         return self._finalize(base)
+            # 分市场速度刹车: 仅对5日急跌且回撤中的市场削减弹性(不误伤未跌市场), 恢复期同组合刹车
+            if self.speed_brake_mkt:
+                for mkt, codes in (("CN", ["159232", "515100", "159952"]), ("US", ["159941", "513500"])):
+                    i = self.sig._idx(dt)
+                    if i >= self.speed_brake_win and i < len(self.R):
+                        seg = self.R.iloc[i - self.speed_brake_win + 1: i + 1][codes]
+                        rn_m = float((1 + seg.fillna(0.0)).mean(axis=1).prod() - 1.0)
+                        dd_m, _, _, _, _ = self.sig.mkt_info(dt, mkt, self.gate_win)
+                        if rn_m < self.speed_brake_mkt_thr and dd_m < self.speed_brake_dd_thr:
+                            self._sb_mkt_on[mkt] = self.speed_brake_recover
+                        if self._sb_mkt_on.get(mkt, 0) > 0:
+                            self._sb_mkt_on[mkt] -= 1
+                            return self.target_with_mkt_cut(dt, ctx, mkt, self.speed_brake_mkt_cut)
             # 速度刹车: 组合急跌(近N日)且处于回撤中 -> 日度减成长弹性, 反弹或N日后自动恢复
             if self.speed_brake and len(pf) >= self.speed_brake_win:
                 rn = float((1 + pf.iloc[-self.speed_brake_win:]).prod() - 1.0)
-                if rn < self.speed_brake_thr and dd < -0.03:
+                if rn < self.speed_brake_thr and dd < self.speed_brake_dd_thr:
                     self._speed_brake_on = self.speed_brake_recover
                 if self._speed_brake_on > 0:
                     self._speed_brake_on -= 1
@@ -786,6 +804,15 @@ class DynamicStrategy:
                     for s in SLOTS:
                         out[s] = self.floor[s] + (out[s] - self.floor[s]) * max(scale2, 0.0)
                 self.risk_log.append((dt, sc, scale))
+        return self._finalize(out)
+
+    def target_with_mkt_cut(self, dt, ctx, mkt, cut):
+        """分市场刹车: 仅削减指定市场 floor 以上的弹性, 另一市场与防御仓不动"""
+        sc = self._eff_score(dt)
+        out = self._base_target(dt, sc)
+        codes = ["159952"] if mkt == "CN" else ["159941", "513500"]
+        for s in codes:
+            out[s] = self.floor[s] + (out[s] - self.floor[s]) * cut
         return self._finalize(out)
 
     def target_with_eq_cap(self, dt, ctx, cap_pct):

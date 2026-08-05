@@ -94,7 +94,7 @@ def update_readme_positions(sec, logmsg):
         return False
     date_str = sec.get("date", "") or ""
     next_fri = dt.date.today() + dt.timedelta(days=(4 - dt.date.today().weekday()) % 7)
-    t = [f"> 数据截至 **{date_str}**（净值口径）｜ v26 定稿｜ 本段由每日自动化在数据刷新后更新并推送", "",
+    t = [f"> 数据截至 **{date_str}**（净值口径）｜ v27 定稿｜ 本段由每日自动化在数据刷新后更新并推送", "",
          f"| 标的 | 实际持仓 | 目标（{next_fri:%Y-%m-%d} 周五调仓） |", "|---|---|---|"]
     for name, act, tgt in sec["rows"]:
         t.append(f"| {name} | {act} | {tgt} |")

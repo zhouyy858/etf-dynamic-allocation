@@ -243,6 +243,11 @@ class DynamicStrategy:
         self.hh_thr = float(cfg.get("hh_thr", 0.08))
         self.hh_cut = float(cfg.get("hh_cut", 0.5))
         self.cool_off_weeks = int(cfg.get("cool_off_weeks", 0))
+        self.reentry_step = float(cfg.get("reentry_step", 0.0))  # 每周重新加仓权益上限增量(pp/week, 0=关闭)
+        self.asset_sb = bool(cfg.get("asset_sb", False))  # 单资产速度刹车(某标的5日急跌->当日削该标的弹性)
+        self.asset_sb_win = int(cfg.get("asset_sb_win", 5))
+        self.asset_sb_thr = float(cfg.get("asset_sb_thr", 0.08))
+        self.asset_sb_cut = float(cfg.get("asset_sb_cut", 0.5))
         self._cool_from = {}
         self._prev_target = {}
         self.speed_brake = bool(cfg.get("speed_brake", False))
@@ -524,6 +529,20 @@ class DynamicStrategy:
             wv = (1 + pf).cumprod()
             dd = wv.iloc[-1] / wv.cummax().iloc[-1] - 1.0 if wv.cummax().iloc[-1] > 0 else 0.0
             sc = self.sig.score(dt)
+            if self.asset_sb and len(pf) >= 40:
+                i = self.sig._idx(dt)
+                if i >= self.asset_sb_win:
+                    base = self._base_target(dt, sc)
+                    mod = False
+                    for s in SLOTS:
+                        seg = self.R.iloc[i - self.asset_sb_win + 1: i + 1][s]
+                        if len(seg.dropna()) >= self.asset_sb_win:
+                            r5 = float((1 + seg.fillna(0.0)).prod() - 1.0)
+                            if r5 < -self.asset_sb_thr:
+                                base[s] = self.floor[s] + (base[s] - self.floor[s]) * self.asset_sb_cut
+                                mod = True
+                    if mod:
+                        return self._finalize(base)
             # 速度刹车: 组合急跌(近N日)且处于回撤中 -> 日度减成长弹性, 反弹或N日后自动恢复
             if self.speed_brake and len(pf) >= self.speed_brake_win:
                 rn = float((1 + pf.iloc[-self.speed_brake_win:]).prod() - 1.0)
@@ -757,7 +776,16 @@ class DynamicStrategy:
                     for s in SLOTS:
                         out[s] = self.floor[s] + (out[s] - self.floor[s]) * cut
                     scale = min(scale, cut)
-        self.risk_log.append((dt, sc, scale))
+        if self.reentry_step > 0:
+            cur = float(ctx.get("equity", 1.0))
+            tgt_eq = sum(out[s] for s in SLOTS) / 100.0
+            if tgt_eq > cur + self.reentry_step:
+                total_flex = sum(out[s] - self.floor[s] for s in SLOTS)
+                scale2 = ((cur + self.reentry_step) * 100.0 - self.floor_eq) / max(total_flex, 1e-9)
+                if scale2 < 1.0:
+                    for s in SLOTS:
+                        out[s] = self.floor[s] + (out[s] - self.floor[s]) * max(scale2, 0.0)
+                self.risk_log.append((dt, sc, scale))
         return self._finalize(out)
 
     def target_with_eq_cap(self, dt, ctx, cap_pct):

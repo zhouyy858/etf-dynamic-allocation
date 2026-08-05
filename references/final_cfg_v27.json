@@ -1,0 +1,149 @@
+{
+ "state_map": {
+  "0": [
+   5,
+   30
+  ],
+  "1": [
+   15,
+   29
+  ],
+  "2": [
+   25,
+   28
+  ],
+  "3": [
+   36,
+   26
+  ],
+  "4": [
+   39,
+   21
+  ],
+  "5": [
+   44,
+   16
+  ],
+  "6": [
+   66,
+   14
+  ],
+  "7": [
+   65,
+   10
+  ],
+  "8": [
+   85,
+   6
+  ],
+  "9": [
+   81,
+   3
+  ]
+ },
+ "market_dd": {
+  "CN": [
+   0.07,
+   0.05,
+   0.18,
+   0.14
+  ],
+  "US": [
+   0.13,
+   0.12,
+   0.24,
+   0.15
+  ]
+ },
+ "dd_eq_cap": [
+  [
+   -0.08,
+   85
+  ],
+  [
+   -0.12,
+   75
+  ],
+  [
+   -0.16,
+   65
+  ],
+  [
+   -0.2,
+   55
+  ]
+ ],
+ "hyst_up": 0.66,
+ "hyst_down": 0.24,
+ "min_cash": 0.03,
+ "max_eq": 0.98,
+ "vol_target": 0.19,
+ "gate_win": 100,
+ "growth_split_bull": {
+  "159952": 0.35,
+  "159941": 0.55,
+  "513500": 0.1
+ },
+ "dd_cap_unconditional": true,
+ "defense_momentum": true,
+ "defense_momentum_win": 80,
+ "defense_momentum_t": 4.0,
+ "defense_clamp": [
+  0.4,
+  0.6
+ ],
+ "premium_gate": true,
+ "premium_thr": [
+  0.05,
+  0.08,
+  0.12
+ ],
+ "premium_cut": [
+  0.45,
+  0.22,
+  0.08
+ ],
+ "corr_risk": true,
+ "corr_risk_win": 40,
+ "corr_risk_thr": [
+  0.3,
+  0.42
+ ],
+ "corr_risk_cut": [
+  0.8,
+  0.6
+ ],
+ "speed_brake": true,
+ "speed_brake_win": 5,
+ "speed_brake_thr": -0.04,
+ "speed_brake_cut": 0.5,
+ "speed_brake_recover": 12,
+ "tranche_weights": [
+  1.0
+ ],
+ "version": "v27",
+ "repo_rate": 0.022,
+ "floor_pct": {
+  "cn": 0.0,
+  "us": 7.5
+ },
+ "_note": "v27(2026-08-05) = v26 + 速度刹车恢复期 8->12 交易日. 机制: 组合5日跌>4%且回撤中触发刹车后, 权益×0.5 保持12日(原8日), 覆盖2021-02-22式'刹车到期→瞬间满仓重入→第二波打穿'的甩鞭区间. 业绩(严格口径, 2026-08-04数据): proxy 11.74%/-6.46%/Cal1.82(v26: 11.15/-8.52/1.31, 收益+0.59pp回撤-2.06pp); real 30.07%/-4.01%/Cal7.50 与v26完全一致(真实窗口未触发速度刹车, 验证为数据限制而非拟合); OOS 1.52 不劣化; 平台验证: recover 10/12/14/16/20 Cal 1.79-1.82 平平台; 7情景压力与v26一致或更优(2019-2021牛市窗口因截断在刹车期而少计0.59pp, 全历史净收益为正); 速度刹车触发历史仅4次(2015-06/2020-09/2021-02×2), 全部为急跌后反弹的甩鞭风险场景. _auto_upgrade来源: exp_v38_recover/reentry/hyst/valuation/asset_sb/combo 全部证伪或单窗口, 仅本轴双指标同升+平台+OOS通过",
+ "cash_bond_pct": 0.75,
+ "cash_bond_code": "511010",
+ "signal_lag": 1,
+ "premium_shift": 2,
+ "score_confirm_weeks": 2,
+ "rebal_weekday": 4,
+ "rebal_freq": "weekly",
+ "growth_split_bear": {
+  "159952": 0.5,
+  "159941": 0.3,
+  "513500": 0.2
+ },
+ "min_delta": 0.035,
+ "confirm_weekday": 2,
+ "premium_tilt": true,
+ "premium_tilt_thr": 0.02,
+ "premium_tilt_cap": 0.05,
+ "premium_tilt_max": 0.5
+}

@@ -173,7 +173,8 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
             w = g / factor
             cash = c / factor
         turnover_day[i] = fee_today
-        weights_history[i] = np.concatenate([w, [cash]])
+        # 记录日终持仓(成交后): 资产权重与现金必须同口径一致, 供展示/avg_cash使用
+        weights_history[i] = np.concatenate([w, [1.0 - w.sum()]])
         rets[i] = pf_ret
         pf_rets_ctx.append(pf_ret)
 

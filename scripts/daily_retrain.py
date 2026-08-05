@@ -17,7 +17,7 @@ PY = sys.executable
 WORK = os.environ.get("ETF_REPORT_DIR", os.path.expanduser("~/ETF策略日报"))
 DATA_DIR = os.path.join(WORK, "data")
 LOG_DIR = os.path.join(WORK, "logs")
-CFG_PATH = os.path.join(SKILL, "references", "final_cfg_v27.json")
+CFG_PATH = os.path.join(SKILL, "references", "final_cfg_v28.json")
 OOS_START = "2022-01-04"   # WFO 样本外窗口起点
 
 def _run_backtest(Rs, ps, cfg):

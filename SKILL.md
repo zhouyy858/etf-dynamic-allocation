@@ -145,5 +145,5 @@ $PY /path/to/skill/scripts/search.py 120 23
 
 - `references/investment_manual.md`：完整投资手册（权重表/触发阈值/分笔细则/牛熊切换/止盈/逆回购/QDII 对策/压力测试/残余风险）。
 - `references/final_cfg_v29.json`：定稿参数（无未来函数口径，run_backtest/日报默认加载；v28 及更早为历史档案）。
-- `references/iterations.json`：v10→v27 迭代进展（含 v21 未来函数修正对照）；`references/stress_test.json`：三情景压力测试 + 合成共振熊市；`references/risk_analysis.json`：相关性/极端窗口；`out/audit_lookahead.json`：时序口径对照结果。
+- `references/iterations.json`：v10→v29 迭代进展（含 v21 未来函数修正对照）；`references/stress_test.json`：三情景压力测试 + 合成共振熊市；`references/risk_analysis.json`：相关性/极端窗口；`out/audit_lookahead.json`：时序口径对照结果。
 - `assets/data/`：回测数据面板（代理 2014 起 + 真实 2025-04 起）。

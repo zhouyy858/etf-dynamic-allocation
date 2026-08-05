@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """每日自动化入口: 拉取最新数据 → 重建面板 → 生成日报 → 发送通知
-由 launchd 每个交易日 09:00 触发（周一至五）；节假日/无新数据时仅记日志不发通知。
+由 Codex 定时任务「每日交易建议」每个交易日 09:00 触发（周一至五）；节假日/无新数据时仅记日志不发通知。
 用法: python3 scripts/daily_automation.py [--no-fetch]
 环境变量: ETF_REPORT_DIR 覆盖报告目录(默认 ~/ETF策略日报)"""
 import os, sys, json, subprocess, datetime as dt, shutil
@@ -93,8 +93,9 @@ def update_readme_positions(sec, logmsg):
         logmsg("[readme] README 缺少 POSITIONS 标记, 跳过自动更新")
         return False
     date_str = sec.get("date", "") or ""
+    next_fri = dt.date.today() + dt.timedelta(days=(4 - dt.date.today().weekday()) % 7)
     t = [f"> 数据截至 **{date_str}**（净值口径）｜ v26 定稿｜ 本段由每日自动化在数据刷新后更新并推送", "",
-         "| 标的 | 实际持仓 | 目标（下周五决策） |", "|---|---|---|"]
+         f"| 标的 | 实际持仓 | 目标（{next_fri:%Y-%m-%d} 周五决策） |", "|---|---|---|"]
     for name, act, tgt in sec["rows"]:
         t.append(f"| {name} | {act} | {tgt} |")
     t += ["", sec["score"] if sec["score"] else "-",
@@ -153,10 +154,12 @@ def main():
 
     # 种子/补齐: 每次运行把 skill 自带数据中缺失的 csv 复制到工作目录(幂等)
     # 修复: 2026-08-04 日报失败——工作目录缺 qdii_price_*.csv/511010 等, 原逻辑仅首次运行复制
-    for f in os.listdir(os.path.join(SKILL, "assets", "data")):
-        if f.endswith(".csv") and not os.path.exists(os.path.join(DATA_DIR, f)):
-            shutil.copy(os.path.join(SKILL, "assets", "data", f), os.path.join(DATA_DIR, f))
-            logmsg(f"[seed] 补齐缺失数据文件 {f}")
+    seed_dir = os.path.join(SKILL, "assets", "data")
+    if os.path.isdir(seed_dir):
+        for f in os.listdir(seed_dir):
+            if f.endswith(".csv") and not os.path.exists(os.path.join(DATA_DIR, f)):
+                shutil.copy(os.path.join(seed_dir, f), os.path.join(DATA_DIR, f))
+                logmsg(f"[seed] 补齐缺失数据文件 {f}")
 
     before = None
     if os.path.exists(STATE):

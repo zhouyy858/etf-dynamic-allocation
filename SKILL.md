@@ -112,7 +112,7 @@ $PY /path/to/skill/scripts/search.py 120 23
 
 ## 自动化（由 Codex 定时任务触发，已停用 launchd）
 
-- 入口：`scripts/daily_automation.py`（建议 Codex 定时任务：每个交易日 09:00）。
+- 入口：`scripts/daily_automation.py`（Codex 定时任务「每日交易建议」：每个交易日 09:00；运行本 skill 安装目录 `~/.codex/skills/etf-dynamic-allocation/scripts/` 下的生产副本，工作区 `backtest/` 下同名文件为镜像、无 git 仓库，不用于定时任务）。
 - 流程：`scripts/daily_fetch.py` 增量拉取最近约20个交易日数据 → 重建面板 → `scripts/daily_report.py` 生成日报 → **自动更新 README「📊 当前持仓现状」段（实际持仓 vs 下周五目标 + 信号/市场/QDII溢价状态）→ 同步数据回 `assets/data/` → git commit + push 到 GitHub** → macOS 通知（可选微信/iOS 推送）。
 - 推送凭据：`~/.config/etf_skill/git_token`（chmod 600，不入库）或环境变量 `ETF_GIT_TOKEN`；无 token 时仅本地更新并记日志。
 - **工作流规则（每次迭代/数据更新后必须执行）**：把 `run_backtest.py`/日报的仓位现状（实际 vs 目标、有效打分、市场状态、QDII 溢价）更新进 README「当前持仓现状」段并推送到 GitHub；数据文件同步 `assets/data/`。
@@ -120,7 +120,7 @@ $PY /path/to/skill/scripts/search.py 120 23
 - 交易日判定：以 ETF 净值最后日期是否更新为准，节假日/无新数据自动跳过、不发送。
 - 可选推送：在 `~/.config/etf_skill/notify.json` 写 `{"serverchan_key":"...","bark_url":"https://api.day.app/xxx"}`。
 
-## 收盘后每周重训（建议 Codex 定时任务：每周五 17:00）
+## 收盘后每周重训（Codex 定时任务「每周训练计划」：每周五 16:00）
 
 - 入口：`scripts/daily_retrain.py`（确定性复检；真正的"自训练参数/方案"由 Codex 定时任务执行，prompt 见 README）。
 - 流程：① 增量拉取当日数据（场内收盘/指数当日值）→ ② 重建面板 → ③ **全参数复检**（8 轴×邻域、proxy+real 双窗口）→ ④ 三关验证（双窗口同向改善>0.15Cal + 平台平坦 + OOS 不劣化）→ 通过则升级新版本配置并记录，否则维持 v26 → ⑤ 生成日报+更新 README 持仓段 → ⑥ git commit + push 到 GitHub → ⑦ macOS 通知。

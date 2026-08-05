@@ -127,18 +127,19 @@ python3 scripts/audit_lookahead.py                   # 未来函数审计（口�
 python3 scripts/stress_test.py                       # 压力测试（牛市/震荡/三轮熊市/跨境共振合成）
 python3 scripts/audit_robustness.py references/final_cfg_v26.json v26   # 防过拟合：参数扰动审计
 python3 scripts/search_v22.py S|F|P|G                # 全参数重训各阶段（可复现）
-python3 scripts/daily_automation.py                  # 每个交易日 09:00 由 launchd 触发：拉数→日报→通知
-python3 scripts/daily_retrain.py                     # 每周五 16:30 由 launchd 触发：拉数→全参复检→三关验证→升级/维持→推送
+python3 scripts/daily_automation.py                  # 日报：拉数→日报→更新README→推送（Codex 定时任务 每交易日 09:00）
+python3 scripts/daily_retrain.py                     # 重训：拉数→全参复检→三关验证→升级/维持→推送（Codex 定时任务 每周五 17:00）
 ```
 
 输出写入当前目录 `out/`；图表为终端 ASCII（不生成图片文件）。每日日报（信号/仓位/目标/调仓动作/QDII 溢价监控/组合表现）保存到 `~/ETF策略日报/reports/`，macOS 通知 + 可选 Server酱/Bark 推送。
 
-## 每日自动化（全部自动推送 GitHub）
+## 自动化（全部自动推送 GitHub，已停用 launchd，改由 Codex 定时任务触发）
 
 - **09:00 日报**：`daily_automation.py` 拉取最新净值 → 生成日报 → 更新 README 当前持仓段 → 推送。
 - **周五 16:30 收盘重训**：`daily_retrain.py` 拉取当日收盘数据 → 全参数复检（8 轴×邻域，proxy/real 双窗口）→ 三关验证（双窗口同向改善 + 平台平坦 + OOS 不劣化）→ 通过则自动升级版本并留档，否则维持 v26 → 更新日报/README → 推送。
 - 防过拟合纪律：拒绝孤峰/单窗口改善；每周只做邻域复检而非自由网格重挖，参数只有被三关验证才会升级。
 - 复检日志：`~/ETF策略日报/logs/retrain_YYYYMMDD.log`；推送凭据 `~/.config/etf_skill/git_token`（chmod 600，不入库）。
+- **Codex 定时任务参考 prompt**（自训练参数/方案）：`拉取ETF最新数据重建面板→设计并运行新参数/方案搜索（候选必须过三关：proxy+real双窗口同向改善、平台平坦、OOS不劣化，禁止孤峰）→通过则升级版本配置否则维持v26并记录→更新README/SKILL.md→git commit+push→汇报结论和当前仓位。`
 
 ## 免责声明
 

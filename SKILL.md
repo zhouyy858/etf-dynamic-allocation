@@ -110,9 +110,9 @@ $PY /path/to/skill/scripts/search.py 120 23
 - `run_backtest.py` 输出：DYN+基准指标表、分阶段表、**当前仓位现状**（实际 vs 目标权重、信号打分、CN/US 市场回撤与锁定状态）、终端 ASCII 净值/回撤/迭代进展图。
 - 刷新数据：`fetch_data.py`（ETF 净值，东方财富）、`fetch_tencent.py`（指数，腾讯）、`fetch_ext.py`（中证指数/QDII 联接）→ 覆盖 `assets/data/` 后重跑回测。
 
-## 每日自动化（每个交易日 09:00）
+## 自动化（由 Codex 定时任务触发，已停用 launchd）
 
-- 入口：`scripts/daily_automation.py`（由 launchd `com.zhouyy858.etf-daily-report` 周一至五 09:00 触发）。
+- 入口：`scripts/daily_automation.py`（建议 Codex 定时任务：每个交易日 09:00）。
 - 流程：`scripts/daily_fetch.py` 增量拉取最近约20个交易日数据 → 重建面板 → `scripts/daily_report.py` 生成日报 → **自动更新 README「📊 当前持仓现状」段（实际持仓 vs 下周五目标 + 信号/市场/QDII溢价状态）→ 同步数据回 `assets/data/` → git commit + push 到 GitHub** → macOS 通知（可选微信/iOS 推送）。
 - 推送凭据：`~/.config/etf_skill/git_token`（chmod 600，不入库）或环境变量 `ETF_GIT_TOKEN`；无 token 时仅本地更新并记日志。
 - **工作流规则（每次迭代/数据更新后必须执行）**：把 `run_backtest.py`/日报的仓位现状（实际 vs 目标、有效打分、市场状态、QDII 溢价）更新进 README「当前持仓现状」段并推送到 GitHub；数据文件同步 `assets/data/`。
@@ -120,9 +120,9 @@ $PY /path/to/skill/scripts/search.py 120 23
 - 交易日判定：以 ETF 净值最后日期是否更新为准，节假日/无新数据自动跳过、不发送。
 - 可选推送：在 `~/.config/etf_skill/notify.json` 写 `{"serverchan_key":"...","bark_url":"https://api.day.app/xxx"}`。
 
-## 收盘后每周重训（每周五 16:30）
+## 收盘后每周重训（建议 Codex 定时任务：每周五 17:00）
 
-- 入口：`scripts/daily_retrain.py`（由 launchd `com.zhouyy858.etf-weekly-retrain` 每周五 16:30 触发）。
+- 入口：`scripts/daily_retrain.py`（确定性复检；真正的"自训练参数/方案"由 Codex 定时任务执行，prompt 见 README）。
 - 流程：① 增量拉取当日数据（场内收盘/指数当日值）→ ② 重建面板 → ③ **全参数复检**（8 轴×邻域、proxy+real 双窗口）→ ④ 三关验证（双窗口同向改善>0.15Cal + 平台平坦 + OOS 不劣化）→ 通过则升级新版本配置并记录，否则维持 v26 → ⑤ 生成日报+更新 README 持仓段 → ⑥ git commit + push 到 GitHub → ⑦ macOS 通知。
 - 防过拟合硬纪律：**拒绝孤峰/尖峰/单窗口改善**，只接受「平台+双窗口+OOS」三关全过的改进；每周只做邻域复检，不做全参数重挖（每周新增样本点不足以支撑自由网格搜索，那正是过拟合的温床）。
 - 复检日志：`~/ETF策略日报/logs/retrain_YYYYMMDD.log`；`--no-fetch` 只复检不拉数，`--no-push` 不推送。

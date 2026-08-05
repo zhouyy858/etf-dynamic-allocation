@@ -35,6 +35,7 @@ CFG26 = json.load(open(f"{SKILL_REF}/final_cfg_v26.json"))
 CFG27 = json.load(open(f"{SKILL_REF}/final_cfg_v27.json"))
 CFG28 = json.load(open(f"{SKILL_REF}/final_cfg_v28.json"))
 CFG29 = json.load(open(f"{SKILL_REF}/final_cfg_v29.json"))
+CFG30 = json.load(open(f"{SKILL_REF}/final_cfg_v30.json"))
 bond = rets_from(read_table("511010_nav.csv"), "cum_nav")
 R, _ = build_panel("proxy"); Rr, _ = build_panel("real")
 
@@ -73,6 +74,7 @@ MODES = [
     ("v27 严格(v26+恢复期12)",        CFG27, DynamicStrategy, "pre", 0, [1.0],   True),
     ("v28 严格(前提驱动)",          CFG28, DynamicStrategy, "pre", 0, [1.0],   True),
     ("v29 严格(AI超配)",           CFG29, DynamicStrategy, "pre", 0, [1.0],   True),
+    ("v30 严格(中间态)",            CFG30, DynamicStrategy, "pre", 0, [1.0],   True),
 ]
 res = {}
 for name, cfg, cls, am, el, tw, st in MODES:
@@ -127,6 +129,10 @@ v29_p = res["v29 严格(AI超配)"]["proxy"]["cagr"]
 v29_r = res["v29 严格(AI超配)"]["real"]["cagr"]
 assert abs(v29_p - 0.1172) < 0.01, f"严格proxy回归失败(v29): {v29_p:.4f}"
 assert abs(v29_r - 0.2882) < 0.01, f"严格real回归失败(v29): {v29_r:.4f}"
+v30_p = res["v30 严格(中间态)"]["proxy"]["cagr"]
+v30_r = res["v30 严格(中间态)"]["real"]["cagr"]
+assert abs(v30_p - 0.1163) < 0.01, f"严格proxy回归失败(v30): {v30_p:.4f}"
+assert abs(v30_r - 0.2882) < 0.01, f"严格real回归失败(v30): {v30_r:.4f}"
 print("\n[ok] 旧口径复现 v20 发布值(16.20%/28.10%) 通过; 严格口径复现 v21/v22/v22b/v24/v25/v26/v27/v28/v29 通过")
 
 print("\n===== 压力测试 (严格口径 vs 旧口径) =====")

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""收盘后全链路重训(由 Codex 定时任务「每周训练计划」每周五 16:00 触发):
+"""每周收盘后全链路重训(由 Codex 定时任务「每周训练计划」每周五 16:00 触发):
   ① 拉取最新数据(场内收盘价/指数当日值) ② 重建面板 ③ 全参数复检(8轴×邻域, 双窗口)
   ④ 三关验证(双窗口同向>0.15Cal + 平台平坦 + OOS不劣化) → 通过则升级新版本配置并记录,
      否则维持 v26 ⑤ 生成日报+更新README POSITIONS ⑥ git commit+push ⑦ 通知
 防过拟合硬纪律: 拒绝孤峰/尖峰/单窗口改善, 只接受平台+双窗口+OOS 三关全过。
-用法: python3 scripts/daily_retrain.py [--no-fetch] [--no-push]
+用法: python3 scripts/week_retrain.py [--no-fetch] [--no-push]
 """
 import os, sys, json, shutil, copy, datetime as dt
 

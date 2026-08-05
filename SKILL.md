@@ -127,7 +127,7 @@ $PY /path/to/skill/scripts/search.py 120 23
 
 ## 收盘后每周重训（Codex 定时任务「每周训练计划」：每周五 16:00）
 
-- 入口：`scripts/daily_retrain.py`（确定性复检；真正的"自训练参数/方案"由 Codex 定时任务执行，prompt 见 README）。
+- 入口：`scripts/week_retrain.py`（确定性复检；真正的"自训练参数/方案"由 Codex 定时任务执行，prompt 见 README）。
 - 流程：① 增量拉取当日数据（场内收盘/指数当日值）→ ② 重建面板 → ③ **全参数复检**（8 轴×邻域、proxy+real 双窗口）→ ④ 三关验证（双窗口同向改善>0.15Cal + 平台平坦 + OOS 不劣化）→ 通过则升级新版本配置并记录，否则维持 v27 → ⑤ 生成日报+更新 README 持仓段 → ⑥ git commit + push 到 GitHub → ⑦ macOS 通知。
 - 防过拟合硬纪律：**拒绝孤峰/尖峰/单窗口改善**，只接受「平台+双窗口+OOS」三关全过的改进；每周只做邻域复检，不做全参数重挖（每周新增样本点不足以支撑自由网格搜索，那正是过拟合的温床）。
 - 复检日志：`~/ETF策略日报/logs/retrain_YYYYMMDD.log`；`--no-fetch` 只复检不拉数，`--no-push` 不推送。

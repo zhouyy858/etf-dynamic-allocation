@@ -120,11 +120,11 @@ $PY /path/to/skill/scripts/search.py 120 23
 - 交易日判定：以 ETF 净值最后日期是否更新为准，节假日/无新数据自动跳过、不发送。
 - 可选推送：在 `~/.config/etf_skill/notify.json` 写 `{"serverchan_key":"...","bark_url":"https://api.day.app/xxx"}`。
 
-## 收盘后每日重训（每个交易日 16:30）
+## 收盘后每周重训（每周五 16:30）
 
-- 入口：`scripts/daily_retrain.py`（由 launchd `com.zhouyy858.etf-daily-retrain` 周一至五 16:30 触发）。
+- 入口：`scripts/daily_retrain.py`（由 launchd `com.zhouyy858.etf-weekly-retrain` 每周五 16:30 触发）。
 - 流程：① 增量拉取当日数据（场内收盘/指数当日值）→ ② 重建面板 → ③ **全参数复检**（8 轴×邻域、proxy+real 双窗口）→ ④ 三关验证（双窗口同向改善>0.15Cal + 平台平坦 + OOS 不劣化）→ 通过则升级新版本配置并记录，否则维持 v26 → ⑤ 生成日报+更新 README 持仓段 → ⑥ git commit + push 到 GitHub → ⑦ macOS 通知。
-- 防过拟合硬纪律：**拒绝孤峰/尖峰/单窗口改善**，只接受「平台+双窗口+OOS」三关全过的改进；每日只做邻域复检，不做全参数重挖（每日一个新样本点不足以支撑自由网格搜索，那正是过拟合的温床）。
+- 防过拟合硬纪律：**拒绝孤峰/尖峰/单窗口改善**，只接受「平台+双窗口+OOS」三关全过的改进；每周只做邻域复检，不做全参数重挖（每周新增样本点不足以支撑自由网格搜索，那正是过拟合的温床）。
 - 复检日志：`~/ETF策略日报/logs/retrain_YYYYMMDD.log`；`--no-fetch` 只复检不拉数，`--no-push` 不推送。
 - 升级产物：`references/final_cfg_v{新版本}.json`，并在配置中记录 `_auto_upgrade` 来源，版本号只增不减、全程留档可回溯。
 

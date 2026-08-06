@@ -7,7 +7,15 @@ import requests, pandas as pd
 
 H = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
      "Referer": "https://fundf10.eastmoney.com/"}
-DATA = os.environ.get("ETF_DATA_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "data")
+def _default_data_dir():
+    here = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(here, "..", "assets", "data"),
+              os.path.join(here, "data"),
+              os.path.join(here, "..", "data")):
+        if os.path.isdir(p):
+            return p
+    return os.path.join(here, "..", "assets", "data")
+DATA = os.environ.get("ETF_DATA_DIR") or _default_data_dir()
 NAV_FUNDS = ["159232", "515100", "159941", "513500", "159952", "270042", "050025"]
 TENCENT = ["sz399006", "sh000300", "sh000905", "sh000016"]
 CSINDEX = [("932365", "中证全指自由现金流"), ("930955", "中证红利低波100"), ("000922", "中证红利")]

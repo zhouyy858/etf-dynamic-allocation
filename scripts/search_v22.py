@@ -15,7 +15,12 @@ import numpy as np, pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_REF = os.path.join(HERE, "..", "references")
-OUT = os.path.join(HERE, "..", "out"); os.makedirs(OUT, exist_ok=True)
+if not os.path.isdir(SKILL_REF):
+    SKILL_REF = os.path.join(HERE, "references")
+OUT = os.path.join(SKILL_REF, "..", "out")
+if not os.path.isdir(OUT):
+    OUT = os.path.join(HERE, "out")
+os.makedirs(OUT, exist_ok=True)
 CFG0 = json.load(open(f"{SKILL_REF}/final_cfg_v21.json"))
 CFG0["signal_lag"] = 1; CFG0["premium_shift"] = 2
 

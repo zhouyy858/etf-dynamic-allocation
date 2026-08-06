@@ -3,7 +3,15 @@
 import pandas as pd, numpy as np, json
 
 import os
-DATA_DIR = os.environ.get("ETF_DATA_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "data")
+def _default_data_dir():
+    here = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(here, "..", "assets", "data"),
+              os.path.join(here, "data"),
+              os.path.join(here, "..", "data")):
+        if os.path.isdir(p):
+            return p
+    return os.path.join(here, "..", "assets", "data")
+DATA_DIR = os.environ.get("ETF_DATA_DIR") or _default_data_dir()
 DATA = DATA_DIR
 ETF_META = {
     "159232": {"name": "自由现金流ETF", "type": "A价值", "market": "CN", "track": "中证全指自由现金流指数"},

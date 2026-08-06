@@ -67,6 +67,11 @@ class SignalSet:
         _win = sorted(set((20, 60, 120, self.gate_win)))
         for nm, x in [("a_mkt", self.a_mkt), ("a_g", self.a_g), ("u_g", self.u_g), ("u_m", self.u_m)]:
             self.sma[nm] = {w: x.rolling(w, min_periods=10).mean() for w in _win}
+        # 性能缓存: 3年(756交易日)滚动窗口 max/min, 与 mkt_info 的 iloc[max(0,i-755):i+1] 逐点等价
+        self.dd_max, self.dd_min = {}, {}
+        for nm, x in (("a_mkt", self.a_mkt), ("u_m", self.u_m)):
+            self.dd_max[nm] = x.rolling(756, min_periods=1).max()
+            self.dd_min[nm] = x.rolling(756, min_periods=1).min()
 
     def _rsrs_panel(self, lvl, win=18):
         """RSRS(close-only版, 94fsckbzfd V8.7口径): 18日 价格-时间 滚动相关系数 r, r^3/std_x
@@ -146,7 +151,8 @@ class SignalSet:
         # 结构防线(不可配置): 信号最小滞后1个交易日 —— 决策日当天收盘数据在盘中不可得,
         # 即使误配 lag=0 也无法读取当日数据; 审计脚本用"数据平移法"(R.shift(-1))模拟旧版
         # 泄漏口径做历史对照, 生产策略代码本身不存在泄漏路径
-        i = self.R.index.get_indexer([dt], method="ffill")[0]
+        # 性能: searchsorted(side="right")-1 与 get_indexer(method="ffill") 语义等价(<=dt 的末位)
+        i = int(self.R.index.searchsorted(dt, side="right")) - 1
         return max(0, i - max(1, int(self.lag)))
 
     def score(self, dt):
@@ -163,13 +169,12 @@ class SignalSet:
         x = self.a_mkt if market == "CN" else self.u_m
         if i >= len(x):
             return 0.0, True, True, 1.0, True
-        px = x.iloc[i]
-        j0 = max(0, i - 755)  # 市场回撤用3年滚动窗口, 避免长历史早期峰值造成失真
-        window = x.iloc[j0:i + 1]
-        peak = window.max()
-        trough = window.min()
-        dd = float(px / peak - 1.0) if peak > 0 else 0.0
         nm = "a_mkt" if market == "CN" else "u_m"
+        px = x.iloc[i]
+        # 市场回撤用3年滚动窗口(避免长历史早期峰值失真); 预计算缓存避免逐日重复 O(755) 切片
+        peak = self.dd_max[nm].iloc[i]
+        trough = self.dd_min[nm].iloc[i]
+        dd = float(px / peak - 1.0) if peak > 0 else 0.0
         s20 = self.sma[nm][20].iloc[i]; s60 = self.sma[nm][60].iloc[i]; sg = self.sma[nm][gate_win].iloc[i]
         rec = float((px - trough) / (peak - trough)) if peak > trough else 1.0
         return dd, bool(px > s20), bool(s20 > s60), rec, bool(px > sg)
@@ -313,6 +318,21 @@ class DynamicStrategy:
         self._lock = {"CN": False, "US": False}
         self.state_log = []
         self.risk_log = []
+        # ---- 性能缓存(仅加速, 与逐日重算数值等价; 配置为关时留空, 走原路径) ----
+        self._corr_cache = None
+        if self.corr_risk:
+            _cn = self.R[["159232", "515100", "159952"]].fillna(0.0).mean(axis=1)
+            _us = self.R[["159941", "513500"]].fillna(0.0).mean(axis=1)
+            self._corr_cache = {"cn": _cn, "us": _us,
+                                "corr": _cn.rolling(self.corr_risk_win).corr(_us),
+                                "cn_std": _cn.rolling(self.corr_risk_win).std(),
+                                "us_std": _us.rolling(self.corr_risk_win).std()}
+        self._mom_cache = {}
+        if self.defense_momentum:
+            for _s in ("159232", "515100"):
+                self._mom_cache[_s] = (1 + self.R[_s].fillna(0.0)).rolling(
+                    self.defense_momentum_win).apply(np.prod, raw=True)
+        self._pf_n = None; self._pf_wv = 0.0; self._pf_cmax = 1.0; self._pf_dd = 0.0
 
     @staticmethod
     def _load_premium_panel(R, shift=1):
@@ -384,12 +404,12 @@ class DynamicStrategy:
         i = self.sig._idx(dt)
         if i < self.corr_risk_win or i >= len(self.R):
             return 1.0
-        seg = self.R.iloc[i - self.corr_risk_win + 1: i + 1]
-        cn = (seg["159232"].fillna(0.0) + seg["515100"].fillna(0.0) + seg["159952"].fillna(0.0)) / 3
-        us = (seg["159941"].fillna(0.0) + seg["513500"].fillna(0.0)) / 2
-        if cn.std() < 1e-12 or us.std() < 1e-12:
+        cc = self._corr_cache
+        cn_std = float(cc["cn_std"].iloc[i])
+        us_std = float(cc["us_std"].iloc[i])
+        if cn_std < 1e-12 or us_std < 1e-12:
             return 1.0
-        c = float(np.corrcoef(cn, us)[0, 1])
+        c = float(cc["corr"].iloc[i])
         if not np.isfinite(c):
             return 1.0
         # 条件化: 双市场均强势(收盘>60日均线)时豁免相关性折扣, 只在弱势/同跌风险期启用
@@ -468,9 +488,9 @@ class DynamicStrategy:
                 k100 = (1 - self.ind_defense_mix) * mom100 + self.ind_defense_mix * max(ind100, 1e-4) ** self.ind_defense_t
             w232 = k232 / (k232 + k100)
         else:
-            seg = self.R.iloc[i - self.defense_momentum_win + 1: i + 1]
-            g232 = float((1 + seg["159232"].fillna(0.0)).prod())
-            g100 = float((1 + seg["515100"].fillna(0.0)).prod())
+            # 60/80日滚动乘积缓存(与 iloc 窗口逐点等价)
+            g232 = float(self._mom_cache["159232"].iloc[i])
+            g100 = float(self._mom_cache["515100"].iloc[i])
             if g232 <= 0 or g100 <= 0:
                 return dict(DEFENSE_SPLIT)
             w232 = g232 ** self.defense_momentum_t / (g232 ** self.defense_momentum_t + g100 ** self.defense_momentum_t)
@@ -526,13 +546,35 @@ class DynamicStrategy:
             return self.regular_target(dt, ctx)
         return fn
 
+    def _pf_stats(self, pf):
+        """组合净值回撤增量缓存: 引擎逐日追加1个收益, 与全量 cumprod/cummax 逐点等价;
+        长度不连续(策略跨回测复用/异常调用)时自动回退全量重算"""
+        if len(pf) == 0:
+            return 0.0, 1.0
+        n = len(pf)
+        if self._pf_n is not None:
+            if n == self._pf_n:
+                return self._pf_dd, self._pf_wv
+            if n == self._pf_n + 1:
+                wv = self._pf_wv * (1.0 + float(pf.iloc[-1]))
+                cm = self._pf_cmax if wv <= self._pf_cmax else wv
+                self._pf_n, self._pf_wv, self._pf_cmax = n, wv, cm
+                dd = wv / cm - 1.0 if cm > 0 else 0.0
+                self._pf_dd = dd
+                return dd, wv
+        wv_s = (1 + pf).cumprod()
+        wv = float(wv_s.iloc[-1])
+        cm = float(wv_s.cummax().iloc[-1])
+        dd = wv / cm - 1.0 if cm > 0 else 0.0
+        self._pf_n, self._pf_wv, self._pf_cmax, self._pf_dd = n, wv, cm, dd
+        return dd, wv
+
     def daily_fn(self):
         def fn(dt, R_prev, ctx):
             pf = ctx.get("pf_rets", pd.Series(dtype=float))
             if len(pf) < 40:
                 return None
-            wv = (1 + pf).cumprod()
-            dd = wv.iloc[-1] / wv.cummax().iloc[-1] - 1.0 if wv.cummax().iloc[-1] > 0 else 0.0
+            dd, _ = self._pf_stats(pf)
             sc = self.sig.score(dt)
             if self.asset_sb and len(pf) >= 40:
                 i = self.sig._idx(dt)
@@ -755,8 +797,7 @@ class DynamicStrategy:
                 ew = pf.ewm(halflife=20).std().iloc[-1] * np.sqrt(252)
             if ew > 0 and ew > vt_eff * self.vol_buf:
                 scale = min(scale, (vt_eff * self.vol_buf) / ew)
-            wv = (1 + pf).cumprod()
-            dd = wv.iloc[-1] / wv.cummax().iloc[-1] - 1.0 if wv.cummax().iloc[-1] > 0 else 0.0
+            dd, _ = self._pf_stats(pf)
             cap = 1.0
             for thr, c in self.dd_eq_cap:
                 if dd < thr and (self.dd_cap_unconditional or sc < 6):

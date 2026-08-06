@@ -25,6 +25,11 @@ PERIODS = {
     "2023-2024震荡": ("2023-01-03", "2024-08-30"),
     "2024Q4-2026双牛": ("2024-09-02", "2026-07-31"),
 }
+
+def make_periods(end_date):
+    """阶段窗口: 末段结束日随面板数据动态延伸(不再写死 2026-07-31)"""
+    d = str(end_date)
+    return dict(PERIODS, **{"2024Q4-2026双牛": ("2024-09-02", d)})
 BENCHMARKS = {
     "B1等权20": {s: 20 for s in SLOTS},
     "B2保守防御": {"159232": 25, "515100": 25, "159941": 20, "513500": 20, "159952": 10},
@@ -46,17 +51,18 @@ def risk_parity_weights(R, start, end):
 def run_all(R, label, start, end, dyn_cfg):
     results = {}
     wealths = {}
+    periods = make_periods(R.index[-1].date() if end is None else pd.Timestamp(end).date())
     for bname, bw in BENCHMARKS.items():
         res = run_backtest(R, fixed_weights=bw, start=start, end=end, name=bname, min_delta=0.0002)
-        results[bname] = evaluate(res, periods=PERIODS)
+        results[bname] = evaluate(res, periods=periods)
         wealths[bname] = res["wealth"]
     rpw = risk_parity_weights(R, start, end)
     res = run_backtest(R, fixed_weights=rpw, start=start, end=end, name="B6风险平价", min_delta=0.0002)
-    results["B6风险平价"] = evaluate(res, periods=PERIODS)
+    results["B6风险平价"] = evaluate(res, periods=periods)
     wealths["B6风险平价"] = res["wealth"]
     ew = {s: 20 for s in SLOTS}
     res = run_backtest(R, fixed_weights=ew, start=start, end=end, name="B7等权买持", min_delta=1.0)
-    results["B7等权买持"] = evaluate(res, periods=PERIODS)
+    results["B7等权买持"] = evaluate(res, periods=periods)
     wealths["B7等权买持"] = res["wealth"]
     ds = DynamicStrategy(R, cfg=dyn_cfg)
     bond = None
@@ -69,7 +75,7 @@ def run_all(R, label, start, end, dyn_cfg):
                        cash_bond_rets=bond, cash_bond_pct=dyn_cfg.get("cash_bond_pct", 0.0),
                        rebal_weekday=dyn_cfg.get("rebal_weekday", 2), rebal_freq=dyn_cfg.get("rebal_freq", "weekly"),
                        strict=True)
-    results[f"DYN {label}"] = evaluate(res, periods=PERIODS)
+    results[f"DYN {label}"] = evaluate(res, periods=periods)
     wealths[f"DYN {label}"] = res["wealth"]
     results["_weights"] = res["weights"]
     results["_rets"] = res["rets"]
@@ -168,10 +174,10 @@ def term_bars(rows, title, width=42):
 # ---------- 主流程 ----------
 def main():
     _here = os.path.dirname(os.path.abspath(__file__))
-    _p1 = os.path.join(_here, "..", "references", "final_cfg_v29.json")
-    _p2 = os.path.join(_here, "references", "final_cfg_v29.json")
+    _p1 = os.path.join(_here, "..", "references", "final_cfg_v30.json")
+    _p2 = os.path.join(_here, "references", "final_cfg_v30.json")
     cfg_file = sys.argv[1] if len(sys.argv) > 1 else (_p1 if os.path.exists(_p1) else _p2)
-    tag = sys.argv[2] if len(sys.argv) > 2 else "v29"
+    tag = sys.argv[2] if len(sys.argv) > 2 else "v30"
     cfg = json.load(open(cfg_file))
     wd = cfg.get("rebal_weekday", 2); wd_cn = "一二三四五"[wd]
     freq = cfg.get("rebal_freq", "weekly"); n_tw = len(cfg.get("tranche_weights", [1.0]))
@@ -183,11 +189,11 @@ def main():
     json.dump({k: v for k, v in rr.items() if not k.startswith("_")},
               open(f"{OUT}/iter_{tag}_real.json", "w"), ensure_ascii=False, indent=2, default=str)
 
-    print("\n===== 扩展代理回测 (2014-06-23 ~ 2026-07-31, 含2015/2018/2021-22三轮大熊) =====")
+    print(f"\n===== 扩展代理回测 ({BACKTEST_START} ~ {R_PROXY.index[-1].date()}, 含2015/2018/2021-22三轮大熊) =====")
     for k, e in rp.items():
         if not k.startswith("_"):
             print(fmt_eval(e))
-    print("\n===== 真实ETF回测 (2025-04-23 ~ 2026-07-31) =====")
+    print(f"\n===== 真实ETF回测 ({REAL_START} ~ {R_REAL.index[-1].date()}) =====")
     for k, e in rr.items():
         if not k.startswith("_"):
             print(fmt_eval(e))

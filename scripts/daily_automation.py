@@ -38,7 +38,8 @@ def notify(title, subtitle, body=""):
             bark = ncfg.get("bark_url")
             if bark:
                 import urllib.parse, urllib.request
-                urllib.request.urlopen(f"{bark}/{urllib.parse.quote(title)}/{urllib.parse.quote(subtitle + '\\n' + body)}", timeout=30)
+                bark_body = subtitle + "\n" + body
+                urllib.request.urlopen(f"{bark}/{urllib.parse.quote(title)}/{urllib.parse.quote(bark_body)}", timeout=30)
         except Exception as e:
             print("[notify-extra]", e)
 

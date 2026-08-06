@@ -12,9 +12,14 @@ from data_prep import build_panel, read_table, rets_from
 from engine import run_backtest, evaluate, SLOTS
 from strategy import DynamicStrategy
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "out"); os.makedirs(OUT, exist_ok=True)
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_REF = os.path.join(HERE, "..", "references")
+if not os.path.isdir(SKILL_REF):
+    SKILL_REF = os.path.join(HERE, "references")
+OUT = os.path.join(SKILL_REF, "..", "out")
+if not os.path.isdir(OUT):
+    OUT = os.path.join(HERE, "out")
+os.makedirs(OUT, exist_ok=True)
 CFG10 = json.load(open(f"{SKILL_REF}/final_cfg_v10.json"))
 CFG14 = json.load(open(f"{SKILL_REF}/final_cfg_v15.json"))
 CFG17 = json.load(open(f"{SKILL_REF}/final_cfg_v17.json"))

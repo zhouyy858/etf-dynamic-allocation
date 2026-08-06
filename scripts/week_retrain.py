@@ -2,7 +2,7 @@
 """每周收盘后全链路重训(由 Codex 定时任务「每周训练计划」每周五 16:00 触发):
   ① 拉取最新数据(场内收盘价/指数当日值) ② 重建面板 ③ 全参数复检(8轴×邻域, 双窗口)
   ④ 三关验证(双窗口同向>0.15Cal + 平台平坦 + OOS不劣化) → 通过则升级新版本配置并记录,
-     否则维持 v26 ⑤ 生成日报+更新README POSITIONS ⑥ git commit+push ⑦ 通知
+     否则维持 v30 ⑤ 生成日报+更新README POSITIONS ⑥ git commit+push ⑦ 通知
 防过拟合硬纪律: 拒绝孤峰/尖峰/单窗口改善, 只接受平台+双窗口+OOS 三关全过。
 用法: python3 scripts/week_retrain.py [--no-fetch] [--no-push]
 """
@@ -18,6 +18,8 @@ WORK = os.environ.get("ETF_REPORT_DIR", os.path.expanduser("~/ETF策略日报"))
 DATA_DIR = os.path.join(WORK, "data")
 LOG_DIR = os.path.join(WORK, "logs")
 CFG_PATH = os.path.join(SKILL, "references", "final_cfg_v30.json")
+if not os.path.exists(CFG_PATH):
+    CFG_PATH = os.path.join(HERE, "references", "final_cfg_v30.json")
 OOS_START = "2022-01-04"   # WFO 样本外窗口起点
 
 def _run_backtest(Rs, ps, cfg):
@@ -48,7 +50,7 @@ def param_check(logmsg):
 
     base_p = run(CFG, R, "2014-06-23"); base_r = run(CFG, Rr, "2025-04-23")
     base_o = run(CFG, R, OOS_START)
-    logmsg(f"[base] v26 proxyCal {base_p[0]:.2f}/realCal {base_r[0]:.2f}/OOS Cal {base_o[0]:.2f}")
+    logmsg(f"[base] v30 proxyCal {base_p[0]:.2f}/realCal {base_r[0]:.2f}/OOS Cal {base_o[0]:.2f}")
 
     def set_cfg(c, ax, v):
         c = copy.deepcopy(c)
@@ -85,7 +87,7 @@ def param_check(logmsg):
             except Exception as e:
                 logmsg(f"[check] {ax}={v} ERR {str(e)[:100]}")
     if not cand:
-        logmsg("[cand] 无双窗口同向改善候选, 维持 v26")
+        logmsg("[cand] 无双窗口同向改善候选, 维持 v30")
         return None
     cand.sort(key=lambda x: x[3] + x[4], reverse=True)
     ax, v, cfg, dp, dr = cand[0]
@@ -133,10 +135,12 @@ def main():
         log.write(f"{dt.datetime.now():%Y-%m-%d %H:%M:%S} {m}\n"); log.flush()
 
     env = dict(os.environ); env["ETF_DATA_DIR"] = DATA_DIR
-    for f in os.listdir(os.path.join(SKILL, "assets", "data")):
-        if f.endswith(".csv") and not os.path.exists(os.path.join(DATA_DIR, f)):
-            shutil.copy(os.path.join(SKILL, "assets", "data", f), os.path.join(DATA_DIR, f))
-            logmsg(f"[seed] 补齐 {f}")
+    seed_dir = os.path.join(SKILL, "assets", "data")
+    if os.path.isdir(seed_dir):
+        for f in os.listdir(seed_dir):
+            if f.endswith(".csv") and not os.path.exists(os.path.join(DATA_DIR, f)):
+                shutil.copy(os.path.join(seed_dir, f), os.path.join(DATA_DIR, f))
+                logmsg(f"[seed] 补齐 {f}")
 
     if do_fetch:
         rc, out, err = da.run([PY, "-W", "ignore", os.path.join(HERE, "daily_fetch.py")], cwd=WORK, env=env)
@@ -190,7 +194,7 @@ def main():
         logmsg("[push] --no-push, 跳过推送")
 
     # ⑦ 通知
-    da.notify("ETF策略每日重训", f"{version_note or '参数复检: 维持v26'} ｜ 数据 {last_date}",
+    da.notify("ETF策略每周重训", f"{version_note or '参数复检: 维持v30'} ｜ 数据 {last_date}",
               f"详见 {LOG_DIR}/retrain_{today_str}.log")
     logmsg("[notify] 已发送通知")
 

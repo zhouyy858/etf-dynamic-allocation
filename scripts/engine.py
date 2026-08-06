@@ -17,7 +17,8 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
                  start=None, end=None, tranches=TRANCHES, fee=FEE, repo=REPO,
                  min_delta=0.002, name="", tranche_weights=None,
                  cash_bond_rets=None, cash_bond_pct=0.0, exec_lag=0, accrual_mode="pre",
-                 rebal_weekday=2, rebal_freq="weekly", strict=False):
+                 rebal_weekday=2, rebal_freq="weekly", strict=False,
+                 cash_gold_rets=None, gold_override_fn=None):
     if strict:
         assert accrual_mode == "pre", "严格模式必须 accrual_mode=pre (成交仓位不得计提当日收益)"
         assert exec_lag == 0, "严格模式必须 exec_lag=0 (决策日收盘成交, 前一日信号)";
@@ -52,6 +53,22 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
     bond = None
     if cash_bond_rets is not None and cash_bond_pct > 0:
         bond = cash_bond_rets.reindex(dates).ffill().fillna(repo_d)
+    gold = None
+    if cash_gold_rets is not None:
+        gold = cash_gold_rets.reindex(dates).ffill().fillna(repo_d)
+    gold_pct_cur = 0.0
+
+    def cash_ret_at(i):
+        # 严格口径: 用上一收盘已生效的黄金配置计提当日收益, 当日决策收盘后生效、次日计收益
+        # 语义: gold_pct_cur = 现金层中黄金占比(0~1), 危机时替代债券+逆回购基准收益
+        gp = gold_pct_cur
+        if gold is not None:
+            base = (1.0 - cash_bond_pct) * repo_d + cash_bond_pct * (
+                float(bond.iloc[i]) if bond is not None else 0.0)
+            return gp * float(gold.iloc[i]) + (1.0 - gp) * base
+        if bond is not None:
+            return (1.0 - cash_bond_pct) * repo_d + cash_bond_pct * float(bond.iloc[i])
+        return repo_d
 
     def fixed_target():
         t = np.array([fixed_weights[s] for s in SLOTS], dtype=float)
@@ -92,10 +109,7 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
             # 新买入/卖出份额自下一交易日起计收益, 不享受成交当日涨跌(消除1日超前收益)
             cash = 1.0 - w.sum()
             r = R.iloc[i].values
-            if bond is not None:
-                cash_ret = (1.0 - cash_bond_pct) * repo_d + cash_bond_pct * float(bond.iloc[i])
-            else:
-                cash_ret = repo_d
+            cash_ret = cash_ret_at(i)
             g = w * (1.0 + r)
             c = cash * (1.0 + cash_ret)
             factor = float(g.sum() + c)
@@ -162,10 +176,7 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
             # 旧版口径: 按成交后权重计提当日收益并扣除费用
             cash = 1.0 - w.sum()
             r = R.iloc[i].values
-            if bond is not None:
-                cash_ret = (1.0 - cash_bond_pct) * repo_d + cash_bond_pct * float(bond.iloc[i])
-            else:
-                cash_ret = repo_d
+            cash_ret = cash_ret_at(i)
             g = w * (1.0 + r)
             c = cash * (1.0 + cash_ret)
             pf_ret = float(g.sum() + c - 1.0 - fee_today * fee)
@@ -173,6 +184,12 @@ def run_backtest(R, target_weights_fn=None, daily_override_fn=None, fixed_weight
             w = g / factor
             cash = c / factor
         turnover_day[i] = fee_today
+        if gold_override_fn is not None:
+            try:
+                gp_new = float(gold_override_fn(dt) or 0.0)
+            except Exception:
+                gp_new = 0.0
+            gold_pct_cur = min(max(gp_new, 0.0), 1.0)
         # 记录日终持仓(成交后): 资产权重与现金必须同口径一致, 供展示/avg_cash使用
         weights_history[i] = np.concatenate([w, [1.0 - w.sum()]])
         rets[i] = pf_ret

@@ -277,6 +277,20 @@ class DynamicStrategy:
         self.vol_gate_win = int(cfg.get("vol_gate_win", 20))
         self.vol_gate_bands = [float(x) for x in cfg.get("vol_gate_bands", [0.30, 0.40, 0.50])]
         self.vol_gate_cuts = [float(x) for x in cfg.get("vol_gate_cuts", [0.7, 0.4, 0.1])]
+        self.adx_gate = bool(cfg.get("adx_gate", False))
+        self.adx_win = int(cfg.get("adx_win", 14))
+        self.adx_bands = [float(x) for x in cfg.get("adx_bands", [10.0, 15.0, 25.0])]
+        self.adx_cuts = [float(x) for x in cfg.get("adx_cuts", [0.7, 0.85, 1.0])]
+        self.reversal_filter = bool(cfg.get("reversal_filter", False))
+        self.rev_thr = float(cfg.get("rev_thr", 0.08))
+        self.rev_span = float(cfg.get("rev_span", 0.10))
+        self.rev_min_k = float(cfg.get("rev_min_k", 0.4))
+        self.gold_crisis = bool(cfg.get("gold_crisis", False))
+        self.gold_dd = float(cfg.get("gold_dd", -0.05))
+        self.gold_rec = float(cfg.get("gold_rec", -0.03))
+        self.gold_pct = float(cfg.get("gold_pct", 0.5))
+        self._adx = None
+        self._gold_on = False
         self.premium_thr = [float(x) for x in cfg.get("premium_thr", PREMIUM_THR)]
         self.premium_cut = [float(x) for x in cfg.get("premium_cut", PREMIUM_CUT)]
         self.premium_shift = int(cfg.get("premium_shift", 1))
@@ -334,6 +348,18 @@ class DynamicStrategy:
                                 "corr": _cn.rolling(self.corr_risk_win).corr(_us),
                                 "cn_std": _cn.rolling(self.corr_risk_win).std(),
                                 "us_std": _us.rolling(self.corr_risk_win).std()}
+        if self.adx_gate:
+            _c = self.sig.a_mkt
+            _d = _c.diff()
+            _tr = _d.abs()
+            _pdm = _d.clip(lower=0.0); _ndm = (-_d).clip(lower=0.0)
+            def _wilder(s):
+                return s.ewm(alpha=1.0 / self.adx_win, adjust=False).mean()
+            _atr = _wilder(_tr)
+            _pdi = 100.0 * _wilder(_pdm) / _atr.replace(0, np.nan)
+            _ndi = 100.0 * _wilder(_ndm) / _atr.replace(0, np.nan)
+            _dx = ((_pdi - _ndi).abs() / (_pdi + _ndi).replace(0, np.nan) * 100.0).fillna(0.0)
+            self._adx = _wilder(_dx).reindex(self.R.index).ffill().fillna(0.0)
         self._mom_cache = {}
         if self.defense_momentum:
             for _s in ("159232", "515100"):
@@ -430,6 +456,70 @@ class DynamicStrategy:
             for c in codes:
                 out[c] = out[c] / s * base_total
         return out
+
+    def _adx_mult(self, dt):
+        """候选v31c-回撤控制端: 市场趋势强度(close-only ADX, 沪深300)分档调弹性
+        低ADX=震荡/无趋势 -> 降弹性, 高ADX=趋势 -> 维持/小幅加仓; 决策日及以前数据, 无未来"""
+        if not self.adx_gate or self._adx is None:
+            return 1.0
+        i = self.sig._idx(dt)
+        if i < 0 or i >= len(self._adx):
+            return 1.0
+        a = float(self._adx.iloc[i])
+        if not np.isfinite(a):
+            return 1.0
+        for b, c in zip(self.adx_bands, self.adx_cuts):
+            if a <= b:
+                return c
+        return self.adx_cuts[-1]
+
+    def _reversal_filter(self, dt, split_g):
+        """候选v31c-收益端: 短期过度延伸降权(20日涨幅>rev_thr后线性惩罚至rev_min_k)
+        仅作用于成长弹性并归一化保持总弹性; 决策日及以前数据, 无未来"""
+        i = self.sig._idx(dt)
+        if i < 20 or i >= len(self.R):
+            return split_g
+        codes = [c for c in ("159952", "159941", "513500") if c in split_g]
+        k = {}
+        for c in codes:
+            r20 = float((1 + self.R[c].iloc[i - 19: i + 1].fillna(0.0)).prod() - 1.0)
+            if r20 > self.rev_thr:
+                k[c] = max(self.rev_min_k, 1.0 - (r20 - self.rev_thr) / self.rev_span)
+            else:
+                k[c] = 1.0
+        out = {c: split_g[c] * k.get(c, 1.0) for c in codes}
+        tot0 = sum(split_g.get(c, 0.0) for c in codes)
+        tot1 = sum(out.values())
+        if tot1 > 1e-12 and tot0 > 0:
+            for c in codes:
+                out[c] = out[c] / tot1 * tot0
+        for c in split_g:
+            out.setdefault(c, split_g[c])
+        return out
+
+    def gold_pct_fn(self):
+        """候选v31c-现金层: 沪深300一年窗回撤<gold_dd时现金层gold_pct转518880黄金,
+        收复gold_rec转回; 返回engine可调用的 现金层黄金占比 函数(无未来, 状态滞回防抖)
+        1年窗回撤与策略3年窗市场回撤口径不同: 3年窗在中长趋势尾端长期<阈值, 不满足"危机"语义"""
+        if not self.gold_crisis:
+            return None
+        def f(dt):
+            try:
+                i = self.sig._idx(dt)
+                x = self.sig.a_mkt
+                seg = x.iloc[max(0, i - 251): i + 1]
+                px = float(x.iloc[i])
+                dd = float(px / seg.max() - 1.0) if seg.max() > 0 else 0.0
+            except Exception:
+                return 0.0
+            if dd is None or not np.isfinite(dd):
+                return 0.0
+            if dd < self.gold_dd:
+                self._gold_on = True
+            elif dd >= self.gold_rec:
+                self._gold_on = False
+            return self.gold_pct if self._gold_on else 0.0
+        return f
 
     def _corr_mult(self, dt):
         """跨市场相关性风控: CN(三只A股等权) vs US(两只QDII等权) 60日滚动相关
@@ -733,6 +823,8 @@ class DynamicStrategy:
             split_g = self._growth_split(dt, {s: split_g.get(s, 0.0) for s in ("159952", "159941", "513500")})
         if self.growth_iv:
             split_g = self._growth_split_iv(dt, {s: split_g.get(s, 0.0) for s in ("159952", "159941", "513500")})
+        if self.reversal_filter:
+            split_g = self._reversal_filter(dt, split_g)
         us_split = self._us_split(dt)
         vg_us = self._valuation_gate(dt, "US")
         vg_cn = self._valuation_gate(dt, "CN")
@@ -744,6 +836,7 @@ class DynamicStrategy:
                     if pm >= thr:
                         prem_cut = min(prem_cut, c)
         corr_cut = self._corr_mult(dt)
+        m_adx = self._adx_mult(dt)
         out = {
             "159232": self.floor["159232"] + split_d["159232"] * d,
             "515100": self.floor["515100"] + split_d["515100"] * d,
@@ -754,7 +847,7 @@ class DynamicStrategy:
         m_cn_g, m_cn_all = self._market_mult(dt, "CN")
         m_us_g, m_us_all = self._market_mult(dt, "US")
         # CN弹性: 成长仓受快刹车+闸门; 防御弹性只受深熊锁定
-        out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut
+        out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut * m_adx
         out["159232"] = self.floor["159232"] + (out["159232"] - self.floor["159232"]) * m_cn_all
         out["515100"] = self.floor["515100"] + (out["515100"] - self.floor["515100"]) * m_cn_all
         if us_split is not None:

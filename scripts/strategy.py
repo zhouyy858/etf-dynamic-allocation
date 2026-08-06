@@ -270,6 +270,13 @@ class DynamicStrategy:
         self.growth_rotation_win = int(cfg.get("growth_rotation_win", 60))
         self.growth_rotation_t = float(cfg.get("growth_rotation_t", 2.0))
         self.growth_clamp = [float(x) for x in cfg.get("growth_clamp", [0.08, 0.60])]
+        self.growth_iv = bool(cfg.get("growth_iv", False))
+        self.growth_iv_win = int(cfg.get("growth_iv_win", 60))
+        self.growth_iv_t = float(cfg.get("growth_iv_t", 1.0))
+        self.vol_gate = bool(cfg.get("vol_gate", False))
+        self.vol_gate_win = int(cfg.get("vol_gate_win", 20))
+        self.vol_gate_bands = [float(x) for x in cfg.get("vol_gate_bands", [0.30, 0.40, 0.50])]
+        self.vol_gate_cuts = [float(x) for x in cfg.get("vol_gate_cuts", [0.7, 0.4, 0.1])]
         self.premium_thr = [float(x) for x in cfg.get("premium_thr", PREMIUM_THR)]
         self.premium_cut = [float(x) for x in cfg.get("premium_cut", PREMIUM_CUT)]
         self.premium_shift = int(cfg.get("premium_shift", 1))
@@ -389,6 +396,34 @@ class DynamicStrategy:
         for c in codes:
             out[c] = min(max(w[c] / tot, lo), hi)
         # 归一化到和 base 总成长弹性一致
+        base_total = sum(base.get(c, 0.0) for c in codes)
+        s = sum(out.values())
+        if s > 0:
+            for c in codes:
+                out[c] = out[c] / s * base_total
+        return out
+
+    def _growth_split_iv(self, dt, base):
+        """候选v31b-收益端: 成长桶内波动率倒数加权(替代固定growth_split)
+        权重∝(1/σ)^t, σ=过去growth_iv_win日收益标准差(滚动, 决策日及以前, 无未来);
+        保持base总成长弹性不变, clamp限制单只; 与前提权重冲突风险见探索记录"""
+        i = self.sig._idx(dt)
+        if i < self.growth_iv_win or i >= len(self.R):
+            return base
+        codes = [c for c in ["159952", "159941", "513500"] if c not in self.exclude]
+        w, tot = {}, 0.0
+        for c in codes:
+            seg = self.R[c].iloc[i - self.growth_iv_win + 1: i + 1].fillna(0.0)
+            sd = float(seg.std())
+            if not np.isfinite(sd) or sd <= 1e-12:
+                sd = 1e-12
+            k = (1.0 / sd) ** self.growth_iv_t
+            w[c] = k
+            tot += k
+        lo, hi = self.growth_clamp
+        out = {}
+        for c in codes:
+            out[c] = min(max(w[c] / tot, lo), hi)
         base_total = sum(base.get(c, 0.0) for c in codes)
         s = sum(out.values())
         if s > 0:
@@ -696,6 +731,8 @@ class DynamicStrategy:
             split_d.setdefault(s, 0.0)
         if self.growth_rotation:
             split_g = self._growth_split(dt, {s: split_g.get(s, 0.0) for s in ("159952", "159941", "513500")})
+        if self.growth_iv:
+            split_g = self._growth_split_iv(dt, {s: split_g.get(s, 0.0) for s in ("159952", "159941", "513500")})
         us_split = self._us_split(dt)
         vg_us = self._valuation_gate(dt, "US")
         vg_cn = self._valuation_gate(dt, "CN")
@@ -805,6 +842,19 @@ class DynamicStrategy:
             if cap < 1.0:
                 total_flex = sum(out[s] - self.floor[s] for s in SLOTS)
                 scale = min(scale, max(0.0, (cap - self.floor_eq) / max(total_flex, 1e-9)))
+            if self.vol_gate:
+                i = self.sig._idx(dt)
+                if i >= self.vol_gate_win:
+                    seg = self.R["159952"].iloc[i - self.vol_gate_win + 1: i + 1].fillna(0.0)
+                    sd = float(seg.std())
+                    if np.isfinite(sd) and sd > 0:
+                        v_ann = sd * np.sqrt(252)
+                        cut = 1.0
+                        for b, c in zip(self.vol_gate_bands, self.vol_gate_cuts):
+                            if v_ann >= b:
+                                cut = min(cut, c)
+                        if cut < 1.0:
+                            scale = min(scale, cut)
         if scale < 1.0:
             for s in SLOTS:
                 out[s] = self.floor[s] + (out[s] - self.floor[s]) * scale

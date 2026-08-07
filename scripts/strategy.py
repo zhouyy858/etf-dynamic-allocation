@@ -281,6 +281,10 @@ class DynamicStrategy:
         self.adx_win = int(cfg.get("adx_win", 14))
         self.adx_bands = [float(x) for x in cfg.get("adx_bands", [10.0, 15.0, 25.0])]
         self.adx_cuts = [float(x) for x in cfg.get("adx_cuts", [0.7, 0.85, 1.0])]
+        self.breadth_gate = bool(cfg.get("breadth_gate", False))
+        self.breadth_win = int(cfg.get("breadth_win", 20))
+        self.breadth_thr = float(cfg.get("breadth_thr", 0.5))
+        self.breadth_cut = float(cfg.get("breadth_cut", 0.7))
         self.reversal_filter = bool(cfg.get("reversal_filter", False))
         self.rev_thr = float(cfg.get("rev_thr", 0.08))
         self.rev_span = float(cfg.get("rev_span", 0.10))
@@ -290,6 +294,7 @@ class DynamicStrategy:
         self.gold_rec = float(cfg.get("gold_rec", -0.03))
         self.gold_pct = float(cfg.get("gold_pct", 0.5))
         self._adx = None
+        self._breadth = None
         self._gold_on = False
         self.premium_thr = [float(x) for x in cfg.get("premium_thr", PREMIUM_THR)]
         self.premium_cut = [float(x) for x in cfg.get("premium_cut", PREMIUM_CUT)]
@@ -360,6 +365,21 @@ class DynamicStrategy:
             _ndi = 100.0 * _wilder(_ndm) / _atr.replace(0, np.nan)
             _dx = ((_pdi - _ndi).abs() / (_pdi + _ndi).replace(0, np.nan) * 100.0).fillna(0.0)
             self._adx = _wilder(_dx).reindex(self.R.index).ffill().fillna(0.0)
+        if self.breadth_gate:
+            _idx = ["index_sh000016.csv", "index_sh000300.csv", "index_sh000905.csv",
+                    "index_sz399006.csv", "index_000922.csv", "index_930955.csv", "index_932365.csv"]
+            _px = []
+            for _f in _idx:
+                try:
+                    _df = pd.read_csv(_data(_f), parse_dates=["date"]).set_index("date")
+                    _c = _df["close"] if "close" in _df.columns else _df["level"]
+                    _px.append(_c.reindex(self.R.index).ffill())
+                except Exception:
+                    pass
+            if len(_px) >= 3:
+                _pxf = pd.concat(_px, axis=1)
+                _sma = _pxf.rolling(self.breadth_win, min_periods=10).mean()
+                self._breadth = (_pxf > _sma).astype(float).mean(axis=1)
         self._mom_cache = {}
         if self.defense_momentum:
             for _s in ("159232", "515100"):
@@ -472,6 +492,19 @@ class DynamicStrategy:
             if a <= b:
                 return c
         return self.adx_cuts[-1]
+
+    def _breadth_mult(self, dt):
+        """候选v31d-回撤控制端: 市场宽度(7个A股指数站上SMA占比<阈值 -> CN成长弹性降)
+        学术依据: Momentum+Breadth+Correlation in TAA; 决策日及以前数据, 无未来"""
+        if not self.breadth_gate or self._breadth is None:
+            return 1.0
+        i = self.sig._idx(dt)
+        if i < 0 or i >= len(self._breadth):
+            return 1.0
+        b = float(self._breadth.iloc[i])
+        if not np.isfinite(b):
+            return 1.0
+        return self.breadth_cut if b < self.breadth_thr else 1.0
 
     def _reversal_filter(self, dt, split_g):
         """候选v31c-收益端: 短期过度延伸降权(20日涨幅>rev_thr后线性惩罚至rev_min_k)
@@ -837,6 +870,7 @@ class DynamicStrategy:
                         prem_cut = min(prem_cut, c)
         corr_cut = self._corr_mult(dt)
         m_adx = self._adx_mult(dt)
+        m_breadth = self._breadth_mult(dt)
         out = {
             "159232": self.floor["159232"] + split_d["159232"] * d,
             "515100": self.floor["515100"] + split_d["515100"] * d,
@@ -847,7 +881,7 @@ class DynamicStrategy:
         m_cn_g, m_cn_all = self._market_mult(dt, "CN")
         m_us_g, m_us_all = self._market_mult(dt, "US")
         # CN弹性: 成长仓受快刹车+闸门; 防御弹性只受深熊锁定
-        out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut * m_adx
+        out["159952"] = self.floor["159952"] + (out["159952"] - self.floor["159952"]) * m_cn_g * m_cn_all * vg_cn * corr_cut * m_adx * m_breadth
         out["159232"] = self.floor["159232"] + (out["159232"] - self.floor["159232"]) * m_cn_all
         out["515100"] = self.floor["515100"] + (out["515100"] - self.floor["515100"]) * m_cn_all
         if us_split is not None:
